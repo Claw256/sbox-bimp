@@ -129,8 +129,9 @@ Close it with USE again or Esc.
 3. That's it. YouTube and the other sites work out of the box.
 
 The object with `MediaPlayer` must be networked; `MediaPlayer` switches its network mode to **Network Object**
-automatically. `scenes/mediaplayer_test.scene` has a screen, a speaker and a single-player controller for quick
-testing. For multiplayer testing, add a `NetworkHelper` with a player prefab.
+automatically. To try it, drop a prefab into any scene that has a player, or play it in Sandbox with
+[BIMP for Sandbox](https://github.com/Claw256/sbox-bimp-addon). For multiplayer testing, add a `NetworkHelper` with a
+player prefab.
 
 ### Building your own screen or speaker
 

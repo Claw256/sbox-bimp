@@ -5,8 +5,13 @@ Thanks for helping. Bug reports, fixes and new site extractors are all welcome.
 ## Getting set up
 
 1. Install [s&box](https://sbox.game) and open `bimp.sbproj` in the editor. It's a **library** project (`rexi/bimp`), not a game.
-2. Open `scenes/mediaplayer_test.scene`: it has a screen, a speaker and a single-player controller.
+2. Test in a separate game project that has BIMP in its `Libraries/bimp` folder: a scene with a player
+   (`PlayerController`), a `bimp_screen` and a `bimp_speaker` prefab. Or test in Sandbox with
+   [BIMP for Sandbox](https://github.com/Claw256/sbox-bimp-addon).
 3. Press play, look at the screen and press USE to open the remote, or use the console commands below.
+
+Don't add scenes or test content to BIMP's `Assets/`: everything there, and everything it references, is uploaded with
+every game or addon that uses the library.
 
 The engine's managed source ([sbox-public](https://github.com/Facepunch/sbox-public)) is the best reference for how the
 UI, input and `VideoPlayer` behave.
@@ -26,7 +31,7 @@ UI, input and `VideoPlayer` behave.
 | `Code/Resolver/Extractors/` | One extractor per site (YouTube, Twitch, Kick, Vimeo, SoundCloud, HLS...) |
 | `Code/Resolver/Media/` | WebM/MP4 parsing and writing, range downloads, the YouTube segmenter |
 | `Code/Resolver/Live/` | Live ingest: RTSP tunnel, HLS, MPEG-TS, AAC decoding, live segmenter |
-| `Assets/` | Prefabs and test scenes |
+| `Assets/` | The screen and speaker prefabs (shipped with everything that uses BIMP, so keep it to those) |
 | `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md): how it works |
 
 ## Rules of the road
@@ -81,7 +86,7 @@ Tips:
 ## Pull requests
 
 1. Keep a PR to one change, and describe what you measured or tested (commands and numbers are ideal).
-2. Make sure the project compiles in the editor with no errors, and that `scenes/mediaplayer_test.scene` still plays.
+2. Make sure the project compiles in the editor with no errors, and that the prefabs still play in a test scene.
 3. Update the README or `docs/` if behaviour, settings or supported sites change.
 
 ## Reporting bugs
