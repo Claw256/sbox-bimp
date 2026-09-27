@@ -1,0 +1,586 @@
+@using System
+@using System.Linq
+@using Sandbox
+@using Sandbox.UI
+@namespace Bimp
+@inherits PanelComponent
+@implements Component.ISceneStage
+
+@*
+	The full controls, shown on the local player's screen when they USE a media player.
+	Created on demand by MediaRemote.Open, never networked.
+*@
+
+<root class="mediaremote @(PadMode ? "pad" : "")">
+
+	@if ( Target is not null )
+	{
+		<div class="window">
+
+			<div class="header">
+				<i>@(Target.AudioOnlyPlayer ? "speaker" : "smart_display")</i>
+				<div class="title">Media Player</div>
+				<div class="close nav" onclick="@Close"><i>close</i></div>
+			</div>
+
+			<div class="now">
+				@if ( Target.HasMedia )
+				{
+					<div class="label">Now playing</div>
+					<div class="track">@Target.Title</div>
+					<div class="sub">
+						@if ( !string.IsNullOrWhiteSpace( Target.RequestedBy ) )
+						{
+							<span>Requested by @Target.RequestedBy</span>
+						}
+						<span class="time">@TimeText</span>
+					</div>
+				}
+				else
+				{
+					<div class="track dim">Nothing playing</div>
+				}
+
+				@if ( !string.IsNullOrWhiteSpace( Target.Status ) )
+				{
+					<div class="status">@Target.Status</div>
+				}
+				@if ( !string.IsNullOrWhiteSpace( Target.LocalNotice ) )
+				{
+					<div class="notice">@Target.LocalNotice</div>
+				}
+			</div>
+
+			@if ( Target.HasMedia && !Target.IsLive && Target.MediaDuration > 0 )
+			{
+				<div class="seek @(Target.CanLocalControl ? "nav" : "disabled")">
+					<SliderControl Min="@(0f)" Max="@Target.MediaDuration" Step="@(1f)" ShowValueTooltip="@false" Value="@SeekValue" OnValueChanged="@OnSeekChanged"></SliderControl>
+				</div>
+			}
+
+			@if ( Target.CanLocalControl && Target.HasMedia )
+			{
+				<div class="transport">
+					@if ( !Target.IsLive )
+					{
+						<div class="btn nav" onclick="@( () => Target.RequestSeek( Target.CurrentTime - 10 ) )"><i>replay_10</i></div>
+						<div class="btn big nav nav-default" onclick="@( () => Target.RequestSetPaused( !Target.Paused ) )"><i>@(Target.Paused ? "play_arrow" : "pause")</i></div>
+						<div class="btn nav" onclick="@( () => Target.RequestSeek( Target.CurrentTime + 10 ) )"><i>forward_10</i></div>
+					}
+					<div class="btn nav" onclick="@Target.RequestSkip"><i>skip_next</i></div>
+					<div class="btn nav" onclick="@Target.RequestStop"><i>stop</i></div>
+				</div>
+			}
+
+			@if ( Target.HasMedia && (Target.AvailableQualities.Count > 0 || Target.AvailableAudioTracks.Count > 0) )
+			{
+				<div class="stream-options">
+					@if ( Target.AvailableQualities.Count > 0 )
+					{
+						<div class="option">
+							<i>high_quality</i>
+							<DropDown class="quality nav" Value="@QualityValue" ValueChanged="@OnQualityChanged" BuildOptions="@BuildQualityOptions"></DropDown>
+						</div>
+					}
+					@if ( Target.AvailableAudioTracks.Count > 0 )
+					{
+						<div class="option">
+							<i>translate</i>
+							<DropDown class="audio-track nav" Value="@AudioTrackValue" ValueChanged="@OnAudioTrackChanged" BuildOptions="@BuildAudioTrackOptions"></DropDown>
+						</div>
+					}
+					<div class="playing-as">@PlayingAsText</div>
+				</div>
+			}
+
+			@if ( (Target.CanLocalControl || Target.CanLocalQueue) && PadMode )
+			{
+				@* a pad can't type a link *@
+				<div class="pad-note"><i>keyboard</i> Use a keyboard to add a link</div>
+			}
+			else if ( Target.CanLocalControl || Target.CanLocalQueue )
+			{
+				<div class="entry">
+					<TextEntry @ref="UrlEntry" Placeholder="Paste a YouTube link or a media url (mp4, webm, mp3...)" onsubmit="@OnSubmit"></TextEntry>
+					@if ( Target.CanLocalControl )
+					{
+						<div class="action primary" onclick="@PlayNow"><i>play_arrow</i> Play now</div>
+					}
+					@if ( Target.CanLocalQueue )
+					{
+						<div class="action" onclick="@AddToQueue"><i>playlist_add</i> Queue</div>
+					}
+				</div>
+			}
+			else
+			{
+				<div class="locked"><i>lock</i> You can't control this player.</div>
+			}
+
+			<div class="queue">
+				<div class="queue-header">
+					<div class="tab nav @(ShowRecent ? "" : "active")" onclick="@( () => ShowRecent = false )">Up next <span class="count">@Target.Queue.Count / @Target.MaxQueue</span></div>
+					<div class="tab nav @(ShowRecent ? "active" : "")" onclick="@( () => ShowRecent = true )">Recent <span class="count">@RecentLinks.All.Count</span></div>
+					<div class="spacer"></div>
+					@if ( !ShowRecent && Target.CanLocalControl && Target.Queue.Count > 0 )
+					{
+						<div class="small-btn nav" onclick="@Target.RequestClearQueue">Clear</div>
+					}
+				</div>
+
+				<div class="queue-list">
+					@if ( ShowRecent )
+					{
+						@if ( RecentLinks.All.Count == 0 )
+						{
+							<div class="empty">Links you play show up here.</div>
+						}
+
+						@foreach ( var recent in RecentLinks.All )
+						{
+							var url = recent.Url;
+							<div class="queue-item recent">
+								<div class="info">
+									<div class="name">@recent.Title</div>
+									<div class="by">@recent.Url</div>
+								</div>
+								<div class="dur">@(recent.IsLive ? "Live" : recent.Duration > 0 ? MediaSource.FormatTime( recent.Duration ) : "")</div>
+								@if ( Target.CanLocalControl )
+								{
+									<div class="small-btn go nav" onclick="@( () => Target.RequestPlay( url ) )"><i>play_arrow</i></div>
+								}
+								@if ( Target.CanLocalQueue )
+								{
+									<div class="small-btn go nav" onclick="@( () => Target.RequestEnqueue( url ) )"><i>playlist_add</i></div>
+								}
+								<div class="small-btn nav" onclick="@( () => RecentLinks.Remove( url ) )"><i>close</i></div>
+							</div>
+						}
+					}
+					else if ( Target.Queue.Count == 0 )
+					{
+						<div class="empty">The queue is empty.</div>
+					}
+
+					@for ( int i = 0; !ShowRecent && i < Target.Queue.Count; i++ )
+					{
+						var index = i;
+						var item = Target.Queue[i];
+						<div class="queue-item">
+							<div class="num">@(index + 1)</div>
+							<div class="info">
+								<div class="name">@item.Title</div>
+								<div class="by">@item.RequestedBy</div>
+							</div>
+							<div class="dur">@(item.IsLive ? "Live" : item.Duration > 0 ? MediaSource.FormatTime( item.Duration ) : "")</div>
+							@if ( Target.CanLocalControl )
+							{
+								<div class="small-btn nav" onclick="@( () => Target.RequestRemove( index ) )"><i>close</i></div>
+							}
+						</div>
+					}
+				</div>
+			</div>
+
+			<div class="footer">
+				<div class="btn small nav" onclick="@ToggleMute"><i>@(MediaSettings.Mute ? "volume_off" : "volume_up")</i></div>
+				<SliderControl class="volume nav" Min="@(0f)" Max="@(1f)" Step="@(0.01f)" ShowValueTooltip="@false" Value="@MediaSettings.Volume" OnValueChanged="@OnVolumeChanged"></SliderControl>
+				@if ( PadMode )
+				{
+					<div class="hint">
+						<InputGlyph Analog="LeftStickY" Size="@InputGlyphSize.Small"></InputGlyph><span>Move</span>
+						@if ( Pad.SelectAction is not null )
+						{
+							<InputGlyph Action="@Pad.SelectAction" Size="@InputGlyphSize.Small"></InputGlyph><span>Select</span>
+						}
+						<InputGlyph Action="@(Pad.BackAction ?? "use")" Size="@InputGlyphSize.Small"></InputGlyph><span>Close</span>
+					</div>
+				}
+				else
+				{
+					<div class="hint"><span>Your volume (all players) ·</span><InputGlyph Action="use" Size="@InputGlyphSize.Small"></InputGlyph><span>or</span><InputGlyph Key="escape" Size="@InputGlyphSize.Small"></InputGlyph><span>to close</span></div>
+				}
+			</div>
+
+		</div>
+	}
+
+</root>
+
+@code
+{
+	/// <summary>
+	/// The player being controlled.
+	/// </summary>
+	public MediaPlayer Target { get; set; }
+
+	/// <summary>
+	/// Close automatically when the camera gets further than this from the player.
+	/// </summary>
+	public float MaxDistance { get; set; } = 1500.0f;
+
+	TextEntry UrlEntry { get; set; }
+
+	/// <summary> The list shows the links this client has played (<see cref="RecentLinks"/>) instead of the queue. </summary>
+	bool ShowRecent { get; set; }
+
+	RealTimeSince sinceOpened = 0;
+	float? pendingSeek;
+	RealTimeSince sincePendingSeek;
+
+	float SeekValue => pendingSeek ?? Target?.CurrentTime ?? 0;
+
+	string TimeText
+	{
+		get
+		{
+			if ( Target is null || !Target.HasMedia ) return "";
+			if ( Target.IsLive ) return "Live";
+			var cur = MediaSource.FormatTime( Target.CurrentTime );
+			var s = Target.MediaDuration > 0 ? $"{cur} / {MediaSource.FormatTime( Target.MediaDuration )}" : cur;
+			return Target.Paused ? $"{s} (paused)" : s;
+		}
+	}
+
+	/// <summary>
+	/// Open the remote for this player, or close it if it's already open for it.
+	/// </summary>
+	public static void Toggle( MediaPlayer target )
+	{
+		if ( !target.IsValid() || Application.IsDedicatedServer ) return;
+
+		var existing = target.Scene.GetAllComponents<MediaRemote>().FirstOrDefault();
+		if ( existing.IsValid() )
+		{
+			if ( existing.Target == target )
+			{
+				existing.Close();
+				return;
+			}
+
+			existing.Target = target;
+			existing.sinceOpened = 0;
+			existing.StateHasChanged();
+			return;
+		}
+
+		var go = target.Scene.CreateObject();
+		go.Name = "bimp remote";
+		go.NetworkMode = NetworkMode.Never;
+		go.Flags |= GameObjectFlags.NotSaved | GameObjectFlags.Hidden;
+
+		var screen = go.Components.Create<ScreenPanel>();
+		screen.ZIndex = 200;
+
+		var remote = go.Components.Create<MediaRemote>();
+		remote.Target = target;
+	}
+
+	/// <summary>
+	/// Is a remote open right now? Games can use this to e.g. hide their crosshair.
+	/// </summary>
+	public static bool IsOpen( Scene scene ) => scene?.GetAllComponents<MediaRemote>().Any() ?? false;
+
+	public void Close()
+	{
+		GameObject.Destroy();
+	}
+
+	protected override void OnTreeFirstBuilt()
+	{
+		base.OnTreeFirstBuilt();
+		UrlEntry?.Focus();
+	}
+
+	//
+	// Controller: the D-pad / left stick moves a highlight between the controls (the "nav" ones), A presses,
+	// left/right adjusts sliders and choices, B closes. See PadNavigation.
+	//
+
+	/// <summary> Played with a controller right now (the engine switches as soon as they touch the keyboard or pad). </summary>
+	bool PadMode => Input.UsingController;
+
+	readonly PadNavigation Pad = new();
+
+	/// <summary> The engine's virtual cursor (left stick moves a pointer) is off while we navigate; this was its setting. </summary>
+	bool? virtualCursorWas;
+
+	/// <summary>
+	/// The very first thing in the frame, before anything (fixed update included) reads input: navigate, then suppress the
+	/// frame's input, so the pad doesn't also move, jump or duck the player behind the remote.
+	/// </summary>
+	void Component.ISceneStage.Start()
+	{
+		if ( !PadMode || !Target.IsValid() || Panel is null )
+		{
+			RestoreVirtualCursor();
+			return;
+		}
+
+		virtualCursorWas ??= Input.EnableVirtualCursor;
+		Input.EnableVirtualCursor = false;
+
+		Pad.Press ??= PressControl;
+		Pad.Adjust ??= AdjustControl;
+		Pad.Update( Panel );
+
+		// B closes (unless it just closed a drop down's menu), and USE again, as on keyboard
+		var close = sinceOpened > 0.2f && (Pad.BackPressed || Input.Pressed( "use" ));
+		Input.Suppressed = true;
+		if ( close ) Close();
+	}
+
+	/// <summary> The window's width in the stylesheet (.window), at 1080p. </summary>
+	const float WindowWidth = 760;
+
+	/// <summary>
+	/// The screen panel already scales the remote with the screen height (as if every screen were 1080 high); this sizes
+	/// it up from there by bimp_ui_scale - at its design size it was small at every resolution - but never wider than
+	/// 90% of the screen.
+	/// </summary>
+	void FitToScreen()
+	{
+		if ( Components.Get<ScreenPanel>() is not { } screen ) return;
+
+		var heightScale = Screen.Size.y / 1080.0f;
+		var widest = heightScale > 0 ? Screen.Size.x * 0.9f / (WindowWidth * heightScale) : 1;
+		var scale = Math.Clamp( MediaSettings.RemoteScale, 0.5f, Math.Max( 0.5f, widest ) );
+		if ( MathF.Abs( screen.Scale - scale ) > 0.001f ) screen.Scale = scale;
+	}
+
+	/// <summary> For probes: each option of an open menu, its classes, and * on the pad's selection. </summary>
+	IEnumerable<string> MenuOptions()
+	{
+		var top = Panel;
+		while ( top?.Parent is not null ) top = top.Parent;
+		var menu = top?.Descendants.OfType<Popup>().FirstOrDefault();
+		return menu is null ? Enumerable.Empty<string>() : menu.Children.Select( c => $"{(c as Button)?.Text}:{c.Classes}{(c == menu.SelectedChild ? "*" : "")}" );
+	}
+
+	/// <summary> For probes: the controller state and what's highlighted. </summary>
+	internal string DescribePad() => $"usingController={Input.UsingController} controllers={Input.ControllerCount} select={Pad.SelectAction ?? "-"} back={Pad.BackAction ?? "-"} virtualCursor={Input.EnableVirtualCursor} screen={Screen.Size} desktopScale={Screen.DesktopScale} uiScale={Panel?.ScaleToScreen} window={Panel?.Descendants.FirstOrDefault( p => p.HasClass( "window" ) )?.Box.Rect} focused=[{Pad.Focused?.Classes}] menu=[{string.Join( " | ", MenuOptions() )}]" + '\n' +
+		string.Join( '\n', Panel.Descendants.Where( p => p.HasClass( "nav" ) ).Select( p => $"  [{p.Classes}] visible={p.IsVisible} rect={p.Box.Rect}" ) );
+
+	/// <summary> For probes: move the highlight as the pad would (up, down, left, right, or "a" to press it), and say where it went. </summary>
+	internal string ProbeMove( string direction )
+	{
+		if ( direction == "a" )
+		{
+			if ( Pad.Focused is { } focused ) PressControl( focused );
+			return $"a on [{Pad.Focused?.Classes}]";
+		}
+
+		var d = direction switch { "up" => new Vector2( 0, -1 ), "down" => new Vector2( 0, 1 ), "left" => new Vector2( -1, 0 ), _ => new Vector2( 1, 0 ) };
+		Pad.ProbeStep( Panel, d );
+		return $"{direction} -> [{Pad.Focused?.Classes}] volume={MediaSettings.Volume:0.00}";
+	}
+
+	void RestoreVirtualCursor()
+	{
+		if ( virtualCursorWas is not { } was ) return;
+		Input.EnableVirtualCursor = was;
+		virtualCursorWas = null;
+	}
+
+	protected override void OnDestroy()
+	{
+		RestoreVirtualCursor();
+		base.OnDestroy();
+	}
+
+	/// <summary> A on a control: a drop down opens its menu (navigated by PadNavigation), a button is clicked. Sliders only take left/right. </summary>
+	void PressControl( Panel control )
+	{
+		if ( control.HasClass( "seek" ) || control.HasClass( "volume" ) ) return;
+
+		if ( control is DropDown dropDown )
+		{
+			dropDown.Open();
+			return;
+		}
+
+		control.CreateEvent( new MousePanelEvent( "onclick", control, "mouseleft" ) );
+	}
+
+	/// <summary> Left/right on a slider: seek by 10 s, volume by 5%. Anything else moves left/right. </summary>
+	bool AdjustControl( Panel control, int step )
+	{
+		if ( control.HasClass( "seek" ) )
+		{
+			OnSeekChanged( Math.Clamp( SeekValue + step * 10, 0, Target.MediaDuration ) );
+			return true;
+		}
+
+		if ( control.HasClass( "volume" ) )
+		{
+			OnVolumeChanged( MathF.Round( (MediaSettings.Volume + step * 0.05f) * 20 ) / 20 );
+			return true;
+		}
+
+		return false;
+	}
+
+	protected override void OnUpdate()
+	{
+		if ( !Target.IsValid() )
+		{
+			Close();
+			return;
+		}
+
+		MenuStyle.Apply( Panel );
+		FitToScreen();
+
+		if ( Input.EscapePressed )
+		{
+			Input.EscapePressed = false;
+			Close();
+			return;
+		}
+
+		// USE again closes it (not while typing - a focused text entry takes the keys)
+		if ( sinceOpened > 0.2f && Input.Pressed( "use" ) && UseHandled.TryConsume() )
+		{
+			Close();
+			return;
+		}
+
+		if ( Scene.Camera is not null && Scene.Camera.WorldPosition.Distance( Target.WorldPosition ) > MaxDistance )
+		{
+			Close();
+			return;
+		}
+
+		// Seek once the slider has settled, rather than spamming the host while dragging
+		if ( pendingSeek.HasValue && sincePendingSeek > 0.3f )
+		{
+			Target.RequestSeek( pendingSeek.Value );
+			pendingSeek = null;
+		}
+	}
+
+	void OnSeekChanged( float value )
+	{
+		if ( Target is null || !Target.CanLocalControl ) return;
+		if ( MathF.Abs( value - Target.CurrentTime ) < 1.5f && !pendingSeek.HasValue ) return; // our own refresh
+
+		pendingSeek = value;
+		sincePendingSeek = 0;
+	}
+
+	//
+	// Resolution / audio track. These are this player's own preferences (saved convars), applied to every
+	// media player - picking one reloads the local stream at the same synced time.
+	//
+
+	string QualityValue => MediaSettings.Quality <= 0 ? "0" : Target.SelectedQuality.ToString();
+
+	List<Option> BuildQualityOptions()
+	{
+		var auto = $"Auto (up to {MediaSettings.MaxVideoHeight}p)";
+		var list = new List<Option> { new Option( auto, "0" ) };
+		foreach ( var h in Target.AvailableQualities )
+			list.Add( new Option( MediaStreamOptions.QualityLabel( h ), h.ToString() ) );
+		return list;
+	}
+
+	void OnQualityChanged( string value )
+	{
+		if ( !int.TryParse( value, out var h ) ) return;
+		if ( h == (MediaSettings.Quality <= 0 ? 0 : Target.SelectedQuality) ) return;
+		MediaSettings.Quality = h;
+	}
+
+	string AudioTrackValue
+	{
+		get
+		{
+			var selected = Target.SelectedAudioTrack ?? Target.AvailableAudioTracks.FirstOrDefault( t => t.IsDefault );
+			return selected?.Id ?? "";
+		}
+	}
+
+	List<Option> BuildAudioTrackOptions()
+	{
+		return Target.AvailableAudioTracks
+			.Select( t => new Option( t.IsDefault && !t.Name.Contains( "original", StringComparison.OrdinalIgnoreCase ) ? $"{t.Name} (original)" : t.Name, t.Id ) )
+			.ToList();
+	}
+
+	void OnAudioTrackChanged( string id )
+	{
+		if ( id == AudioTrackValue ) return;
+		var track = Target.AvailableAudioTracks.FirstOrDefault( t => t.Id == id );
+		// picking the original clears the preference, so dubbed videos default to original again
+		MediaSettings.AudioLanguage = track is null || track.IsDefault ? "" : track.Id;
+	}
+
+	string PlayingAsText
+	{
+		get
+		{
+			var b = Target.Backend;
+			if ( b is null || !b.Loaded ) return "Loading...";
+			return b.HasVideo ? $"Playing {b.Height}p" : "";
+		}
+	}
+
+	void OnVolumeChanged( float value )
+	{
+		MediaSettings.Volume = value.Clamp( 0, 1 );
+		if ( value > 0 ) MediaSettings.Mute = false;
+	}
+
+	void ToggleMute()
+	{
+		MediaSettings.Mute = !MediaSettings.Mute;
+	}
+
+	string TakeUrl()
+	{
+		var text = UrlEntry?.Text?.Trim();
+		if ( UrlEntry is not null ) UrlEntry.Text = "";
+		return string.IsNullOrWhiteSpace( text ) ? null : text;
+	}
+
+	void OnSubmit()
+	{
+		// Enter plays right away if we can, otherwise queues
+		if ( Target.CanLocalControl && !Target.HasMedia ) PlayNow();
+		else if ( Target.CanLocalQueue ) AddToQueue();
+		else PlayNow();
+	}
+
+	void PlayNow()
+	{
+		var url = TakeUrl();
+		if ( url is null ) return;
+		Target.RequestPlay( url );
+	}
+
+	void AddToQueue()
+	{
+		var url = TakeUrl();
+		if ( url is null ) return;
+		Target.RequestEnqueue( url );
+	}
+
+	protected override int BuildHash()
+	{
+		if ( Target is null ) return 0;
+
+		return HashCode.Combine(
+			HashCode.Combine( Target.PlayId, Target.Title, Target.Paused, Target.Status, Target.LocalNotice, (int)Target.CurrentTime, Target.MediaDuration ),
+			HashCode.Combine( QueueHash(), MediaSettings.Mute, MediaSettings.Volume, Target.CanLocalControl, pendingSeek, PadMode ),
+			HashCode.Combine( Target.Qualities, Target.AudioTracks, MediaSettings.Quality, MediaSettings.AudioLanguage, PlayingAsText, ShowRecent, RecentLinks.Version )
+		);
+	}
+
+	int QueueHash()
+	{
+		var h = new HashCode();
+		h.Add( Target.Queue.Count );
+		foreach ( var item in Target.Queue ) h.Add( item?.Url );
+		return h.ToHashCode();
+	}
+}

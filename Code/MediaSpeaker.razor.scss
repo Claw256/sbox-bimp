@@ -1,0 +1,113 @@
+.mediaspeaker
+{
+	width: 100%;
+	height: 100%;
+	flex-direction: column;
+	padding: 28px 36px;
+	border-radius: 24px;
+	background: linear-gradient( to bottom, #151a24, #07090d );
+	font-family: Poppins;
+	color: white;
+	position: relative;
+
+	i
+	{
+		font-family: "Material Icons";
+	}
+
+	.header
+	{
+		flex-direction: row;
+		align-items: center;
+		gap: 16px;
+
+		i
+		{
+			font-size: 56px;
+			color: #3fa9ff;
+		}
+
+		.title
+		{
+			flex-grow: 1;
+			flex-basis: 0;
+			font-size: 40px;
+			font-weight: 700;
+		}
+
+		.hint
+		{
+			flex-direction: row;
+			align-items: center;
+			gap: 10px;
+			font-size: 28px;
+			font-weight: 600;
+			opacity: 0.8;
+			white-space: nowrap;
+
+			span
+			{
+				flex-shrink: 0;
+			}
+		}
+	}
+
+	.spectrumbars
+	{
+		flex-grow: 1;
+		margin: 20px 0;
+	}
+
+	.footer
+	{
+		flex-direction: row;
+		font-size: 28px;
+		opacity: 0.75;
+
+		.time
+		{
+			flex-grow: 1;
+			// every digit the same width, so it doesn't jiggle as it counts (Poppins has no tabular digits, Inter does)
+			font-family: Inter;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.queue
+		{
+			align-items: center;
+			gap: 6px;
+		}
+	}
+
+	.notice
+	{
+		position: absolute;
+		left: 20px;
+		right: 20px;
+		bottom: 20px;
+		padding: 12px 20px;
+		border-radius: 12px;
+		background-color: rgba( 180, 40, 40, 0.92 );
+		font-size: 26px;
+	}
+
+	&.idle .spectrumbars
+	{
+		opacity: 0.3;
+	}
+}
+
+.spectrumbars
+{
+	flex-direction: row;
+	align-items: flex-end;
+	gap: 6px;
+
+	.bar
+	{
+		flex-grow: 1;
+		height: 3%;
+		border-radius: 4px 4px 0 0;
+		background: linear-gradient( to top, #3fa9ff, #a36bff );
+	}
+}

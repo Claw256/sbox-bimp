@@ -1,0 +1,503 @@
+$accent: #3fa9ff;
+
+.mediaremote
+{
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 100%;
+	height: 100%;
+	justify-content: center;
+	align-items: center;
+	background-color: rgba( 0, 0, 0, 0.35 );
+	pointer-events: all;
+	font-family: Poppins;
+	color: white;
+
+	i
+	{
+		font-family: "Material Icons";
+	}
+
+	.window
+	{
+		width: 760px;
+		max-height: 90%;
+		flex-direction: column;
+		padding: 24px 28px;
+		border-radius: 16px;
+		background-color: rgba( 14, 17, 23, 0.97 );
+		border: 1px solid rgba( 255, 255, 255, 0.08 );
+		box-shadow: 0 10px 40px rgba( 0, 0, 0, 0.6 );
+		gap: 16px;
+	}
+
+	.header
+	{
+		flex-direction: row;
+		align-items: center;
+		gap: 12px;
+
+		> i
+		{
+			font-size: 30px;
+			color: $accent;
+		}
+
+		.title
+		{
+			flex-grow: 1;
+			font-size: 22px;
+			font-weight: 700;
+		}
+
+		.close
+		{
+			width: 36px;
+			height: 36px;
+			border-radius: 18px;
+			justify-content: center;
+			align-items: center;
+			cursor: pointer;
+			opacity: 0.7;
+
+			&:hover
+			{
+				opacity: 1;
+				background-color: rgba( 255, 255, 255, 0.1 );
+			}
+		}
+	}
+
+	.now
+	{
+		flex-direction: column;
+		gap: 4px;
+
+		.label
+		{
+			font-size: 13px;
+			text-transform: uppercase;
+			opacity: 0.5;
+			letter-spacing: 1px;
+		}
+
+		.track
+		{
+			font-size: 20px;
+			font-weight: 600;
+
+			&.dim
+			{
+				opacity: 0.5;
+			}
+		}
+
+		.sub
+		{
+			flex-direction: row;
+			font-size: 14px;
+			opacity: 0.7;
+			gap: 16px;
+
+			.time
+			{
+				margin-left: auto;
+				// every digit the same width, so it doesn't jiggle as it counts (Poppins has no tabular digits, Inter does)
+				font-family: Inter;
+				font-variant-numeric: tabular-nums;
+			}
+		}
+
+		.status
+		{
+			margin-top: 6px;
+			font-size: 14px;
+			color: #ffcc66;
+		}
+
+		.notice
+		{
+			margin-top: 6px;
+			padding: 8px 12px;
+			border-radius: 8px;
+			font-size: 14px;
+			background-color: rgba( 180, 40, 40, 0.85 );
+		}
+	}
+
+	.seek
+	{
+		&.disabled
+		{
+			pointer-events: none;
+			opacity: 0.5;
+		}
+
+		SliderControl, .slidercontrol
+		{
+			width: 100%;
+		}
+	}
+
+	.transport
+	{
+		flex-direction: row;
+		justify-content: center;
+		gap: 10px;
+	}
+
+	.btn
+	{
+		width: 48px;
+		height: 48px;
+		border-radius: 24px;
+		justify-content: center;
+		align-items: center;
+		background-color: rgba( 255, 255, 255, 0.08 );
+		cursor: pointer;
+
+		i
+		{
+			font-size: 28px;
+		}
+
+		&.big
+		{
+			width: 60px;
+			height: 60px;
+			border-radius: 30px;
+			background-color: $accent;
+
+			i
+			{
+				font-size: 36px;
+			}
+		}
+
+		&.small
+		{
+			width: 36px;
+			height: 36px;
+
+			i
+			{
+				font-size: 20px;
+			}
+		}
+
+		&:hover
+		{
+			background-color: rgba( 63, 169, 255, 0.6 );
+		}
+	}
+
+	.entry
+	{
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
+
+		TextEntry, .textentry
+		{
+			flex-grow: 1;
+			height: 44px;
+			padding: 0 14px;
+			border-radius: 8px;
+			font-size: 15px;
+			background-color: rgba( 255, 255, 255, 0.07 );
+			border: 1px solid rgba( 255, 255, 255, 0.12 );
+			align-items: center;
+
+			&:focus
+			{
+				border-color: $accent;
+			}
+		}
+
+		.action
+		{
+			height: 44px;
+			padding: 0 14px;
+			border-radius: 8px;
+			align-items: center;
+			gap: 6px;
+			font-size: 15px;
+			font-weight: 600;
+			white-space: nowrap;
+			cursor: pointer;
+			background-color: rgba( 255, 255, 255, 0.1 );
+
+			i
+			{
+				font-size: 20px;
+			}
+
+			&.primary
+			{
+				background-color: $accent;
+			}
+
+			&:hover
+			{
+				opacity: 0.85;
+			}
+		}
+	}
+
+	.stream-options
+	{
+		flex-direction: row;
+		align-items: center;
+		gap: 12px;
+
+		.option
+		{
+			flex-direction: row;
+			align-items: center;
+			gap: 6px;
+
+			> i
+			{
+				font-size: 20px;
+				opacity: 0.6;
+			}
+		}
+
+		.dropdown
+		{
+			min-width: 150px;
+			height: 34px;
+			padding: 0 10px;
+			border-radius: 8px;
+			font-size: 14px;
+			align-items: center;
+			background-color: rgba( 255, 255, 255, 0.07 );
+			border: 1px solid rgba( 255, 255, 255, 0.12 );
+			cursor: pointer;
+
+			&:hover
+			{
+				border-color: $accent;
+			}
+		}
+
+		.audio-track
+		{
+			min-width: 220px;
+		}
+
+		.playing-as
+		{
+			margin-left: auto;
+			font-size: 12px;
+			opacity: 0.5;
+		}
+	}
+
+	.locked
+	{
+		align-items: center;
+		gap: 8px;
+		font-size: 15px;
+		opacity: 0.6;
+	}
+
+	.queue
+	{
+		flex-direction: column;
+		gap: 8px;
+		min-height: 0;
+		flex-shrink: 1;
+
+		.queue-header
+		{
+			flex-direction: row;
+			align-items: center;
+			gap: 10px;
+			font-size: 14px;
+			font-weight: 600;
+
+			.tab
+			{
+				flex-direction: row;
+				gap: 6px;
+				padding: 4px 10px;
+				border-radius: 6px;
+				cursor: pointer;
+				opacity: 0.55;
+
+				&.active
+				{
+					opacity: 1;
+					background-color: rgba( 255, 255, 255, 0.08 );
+				}
+
+				&:hover
+				{
+					opacity: 1;
+				}
+			}
+
+			.count
+			{
+				opacity: 0.5;
+				font-weight: 400;
+			}
+
+			.spacer
+			{
+				flex-grow: 1;
+			}
+		}
+
+		.queue-list
+		{
+			flex-direction: column;
+			max-height: 260px;
+			overflow-y: scroll;
+			gap: 4px;
+		}
+
+		.empty
+		{
+			font-size: 14px;
+			opacity: 0.4;
+			padding: 8px 0;
+		}
+
+		.queue-item
+		{
+			flex-direction: row;
+			align-items: center;
+			gap: 12px;
+			padding: 8px 10px;
+			border-radius: 8px;
+			background-color: rgba( 255, 255, 255, 0.04 );
+			flex-shrink: 0;
+
+			.num
+			{
+				width: 22px;
+				font-size: 14px;
+				opacity: 0.5;
+			}
+
+			.info
+			{
+				flex-grow: 1;
+				flex-direction: column;
+				overflow: hidden;
+
+				.name
+				{
+					font-size: 15px;
+					white-space: nowrap;
+					text-overflow: ellipsis;
+					overflow: hidden;
+				}
+
+				.by
+				{
+					font-size: 12px;
+					opacity: 0.5;
+				}
+			}
+
+			.dur
+			{
+				font-size: 13px;
+				opacity: 0.6;
+			}
+		}
+	}
+
+	.small-btn
+	{
+		padding: 4px 10px;
+		border-radius: 6px;
+		font-size: 13px;
+		cursor: pointer;
+		align-items: center;
+		background-color: rgba( 255, 255, 255, 0.08 );
+
+		i
+		{
+			font-size: 16px;
+		}
+
+		&:hover
+		{
+			background-color: rgba( 220, 60, 60, 0.7 );
+		}
+
+		// play / queue again, not remove
+		&.go:hover
+		{
+			background-color: rgba( 63, 169, 255, 0.6 );
+		}
+	}
+
+	// controller: the highlighted control (see PadNavigation) - the same ring and glow on everything. The ring is a
+	// shadow, not a border, so nothing changes size (a border made the whole window shift at every move). Round
+	// buttons keep their own corners; the rest get rounded ones
+	.pad-focus
+	{
+		box-shadow: 0 0 0 2px $accent, 0 0 14px rgba( 63, 169, 255, 0.7 );
+		background-color: rgba( 63, 169, 255, 0.3 );
+	}
+
+	.dropdown.pad-focus, .seek.pad-focus, .volume.pad-focus, .tab.pad-focus, .small-btn.pad-focus
+	{
+		border-radius: 8px;
+	}
+
+	// the play button is already filled with the accent
+	.btn.big.pad-focus
+	{
+		background-color: $accent;
+	}
+
+	.pad-note
+	{
+		align-items: center;
+		gap: 8px;
+		font-size: 15px;
+		opacity: 0.6;
+
+		i
+		{
+			font-size: 20px;
+		}
+	}
+
+	.footer
+	{
+		flex-direction: row;
+		align-items: center;
+		gap: 12px;
+		padding-top: 8px;
+		border-top: 1px solid rgba( 255, 255, 255, 0.08 );
+
+		.volume
+		{
+			width: 220px;
+		}
+
+		.hint
+		{
+			margin-left: auto;
+			flex-direction: row;
+			align-items: center;
+			gap: 6px;
+			font-size: 13px;
+			opacity: 0.65;
+			white-space: nowrap;
+
+			.inputglyph
+			{
+				height: 2em;
+			}
+		}
+	}
+}

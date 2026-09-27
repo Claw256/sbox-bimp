@@ -1,0 +1,100 @@
+@using System
+@using Sandbox
+@using Sandbox.UI
+@namespace Bimp
+@inherits PanelComponent
+@implements Component.ExecuteInEditor
+
+@*
+	A small display for audio-only players (speakers, radios, jukeboxes).
+	Put this on a GameObject with a WorldPanel (PanelSize ~800x400).
+*@
+
+<root class="mediaspeaker @(Player?.HasMedia == true ? "playing" : "idle")">
+
+	<div class="header">
+		<i>@(Player?.HasMedia == true ? "graphic_eq" : "speaker")</i>
+		@if ( ShowUseHint )
+		{
+			<div class="title hint"><span>Press</span><InputGlyph Action="use"></InputGlyph><span>to play something</span></div>
+		}
+		else
+		{
+			<ScrollingText class="title" Text="@TitleText"></ScrollingText>
+		}
+	</div>
+
+	<SpectrumBars Player="@Player"></SpectrumBars>
+
+	<div class="footer">
+		<div class="time">@TimeText</div>
+		@if ( Player is not null && Player.Queue.Count > 0 )
+		{
+			<div class="queue"><i>queue_music</i> @Player.Queue.Count</div>
+		}
+	</div>
+
+	@if ( !string.IsNullOrWhiteSpace( Player?.LocalNotice ) )
+	{
+		<div class="notice">@Player.LocalNotice</div>
+	}
+
+</root>
+
+@code
+{
+	/// <summary>
+	/// The player this display shows. Found automatically in this object or its parents if unset.
+	/// </summary>
+	[Property] public MediaPlayer Player { get; set; }
+
+	/// <summary>
+	/// Scale the UI to fit the WorldPanel's PanelSize instead of getting cut off. Sets the WorldPanel's RenderScale.
+	/// </summary>
+	[Property, Group( "Layout" )] public bool FitToPanel { get; set; } = true;
+
+	/// <summary>
+	/// The panel size the UI is designed for.
+	/// </summary>
+	[Property, Group( "Layout" ), ShowIf( nameof( FitToPanel ), true )] public Vector2 DesignSize { get; set; } = new Vector2( 560, 280 );
+
+	string TitleText
+	{
+		get
+		{
+			if ( Player is null ) return "";
+			if ( Player.HasMedia ) return Player.Title;
+			if ( !string.IsNullOrWhiteSpace( Player.Status ) ) return Player.Status;
+			return "";
+		}
+	}
+
+	/// <summary> Nothing playing or happening: show how to start something, with the USE button's glyph. </summary>
+	bool ShowUseHint => Player is not null && !Player.HasMedia && string.IsNullOrWhiteSpace( Player.Status );
+
+	string TimeText
+	{
+		get
+		{
+			if ( Player is null || !Player.HasMedia ) return "";
+			if ( Player.IsLive ) return "Live";
+			var cur = MediaSource.FormatTime( Player.CurrentTime );
+			var s = Player.MediaDuration > 0 ? $"{cur} / {MediaSource.FormatTime( Player.MediaDuration )}" : cur;
+			return Player.Paused ? $"{s}  (paused)" : s;
+		}
+	}
+
+	protected override void OnUpdate()
+	{
+		if ( FitToPanel ) PanelFit.Apply( this, DesignSize );
+		if ( Scene.IsEditor ) return;
+
+		Player ??= GetComponentInParent<MediaPlayer>();
+	}
+
+	protected override int BuildHash()
+	{
+		if ( Player is null ) return 0;
+		return HashCode.Combine( Player.PlayId, Player.Title, Player.Status, Player.Paused, (int)Player.CurrentTime, Player.Queue.Count, Player.LocalNotice );
+	}
+}

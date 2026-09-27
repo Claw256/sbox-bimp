@@ -1,0 +1,361 @@
+$accent: #3fa9ff;
+$bg: #000;
+$panel: rgba( 10, 12, 16, 0.85 );
+
+.mediascreen
+{
+	width: 100%;
+	height: 100%;
+	background-color: $bg;
+	font-family: Poppins;
+	color: white;
+	position: relative;
+	overflow: hidden;
+	pointer-events: all;
+
+	.video
+	{
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 100%;
+		height: 100%;
+		background-size: contain;
+		background-position: center;
+		background-repeat: no-repeat;
+	}
+
+	i
+	{
+		font-family: "Material Icons";
+	}
+
+	.splash, .audio
+	{
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 100%;
+		height: 100%;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		background: linear-gradient( to bottom, #11161f, #05070a );
+
+		> i
+		{
+			font-size: 200px;
+			color: $accent;
+			opacity: 0.8;
+		}
+
+		.title
+		{
+			font-size: 72px;
+			font-weight: 700;
+			margin-top: 20px;
+			text-align: center;
+			max-width: 85%;
+		}
+
+		.hint, .status
+		{
+			font-size: 36px;
+			opacity: 0.6;
+			margin-top: 16px;
+			text-align: center;
+			max-width: 85%;
+		}
+
+		.hint
+		{
+			flex-direction: row;
+			align-items: center;
+			gap: 12px;
+			white-space: nowrap;
+		}
+
+		.status
+		{
+			color: #ffcc66;
+			opacity: 0.9;
+		}
+	}
+
+	.audio
+	{
+		> i
+		{
+			font-size: 120px;
+		}
+
+		.title
+		{
+			font-size: 56px;
+			max-width: 85%;
+			justify-content: center;
+
+			// a title too long to fit scrolls from its start
+			&.overflowing
+			{
+				justify-content: flex-start;
+			}
+		}
+
+		.spectrumbars
+		{
+			width: 80%;
+			height: 35%;
+			margin-top: 40px;
+		}
+	}
+
+	.loading
+	{
+		position: absolute;
+		left: 40px;
+		top: 40px;
+		padding: 12px 24px;
+		border-radius: 12px;
+		background-color: $panel;
+		font-size: 32px;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.notice
+	{
+		position: absolute;
+		top: 40px;
+		right: 40px;
+		max-width: 60%;
+		padding: 16px 28px;
+		border-radius: 12px;
+		background-color: rgba( 180, 40, 40, 0.9 );
+		font-size: 32px;
+	}
+
+	.osd
+	{
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		flex-direction: column;
+		padding: 40px 48px 32px 48px;
+		background: linear-gradient( to top, rgba( 0, 0, 0, 0.9 ), rgba( 0, 0, 0, 0 ) );
+		opacity: 0;
+		transition: opacity 0.3s ease;
+
+		.meta
+		{
+			flex-direction: row;
+			align-items: flex-end;
+			margin-bottom: 16px;
+
+			.title
+			{
+				flex-grow: 1;
+				flex-basis: 0;
+				font-size: 44px;
+				font-weight: 700;
+			}
+
+			.time
+			{
+				font-size: 36px;
+				opacity: 0.8;
+				margin-left: 24px;
+				white-space: nowrap;
+				flex-shrink: 0;
+				// every digit the same width, so it doesn't jiggle as it counts (Poppins has no tabular digits, Inter does)
+				font-family: Inter;
+				font-variant-numeric: tabular-nums;
+			}
+		}
+
+		.progress
+		{
+			height: 14px;
+			border-radius: 7px;
+			background-color: rgba( 255, 255, 255, 0.2 );
+			cursor: pointer;
+
+			.fill
+			{
+				height: 100%;
+				width: 0%;
+				border-radius: 7px;
+				background-color: $accent;
+			}
+
+			&:hover
+			{
+				height: 22px;
+			}
+		}
+
+		.live
+		{
+			align-self: flex-start;
+			padding: 4px 16px;
+			border-radius: 6px;
+			background-color: #d22;
+			font-size: 28px;
+			font-weight: 700;
+			align-items: center;
+			gap: 8px;
+		}
+
+		.controls
+		{
+			flex-direction: row;
+			align-items: center;
+			margin-top: 20px;
+			gap: 12px;
+
+			.btn
+			{
+				width: 88px;
+				height: 88px;
+				border-radius: 44px;
+				align-items: center;
+				justify-content: center;
+				background-color: rgba( 255, 255, 255, 0.1 );
+				cursor: pointer;
+
+				i
+				{
+					font-size: 56px;
+				}
+
+				&:hover
+				{
+					background-color: $accent;
+				}
+			}
+
+			.spacer
+			{
+				flex-grow: 1;
+			}
+
+			.queue-count, .by
+			{
+				font-size: 30px;
+				opacity: 0.75;
+				align-items: center;
+				gap: 8px;
+				margin-left: 24px;
+			}
+		}
+	}
+
+	// Controls show when you start looking at the screen, and hide after MediaScreen.HideControlsAfter.
+	// Hidden controls don't take clicks - look away and back to bring them up.
+	.osd
+	{
+		pointer-events: none;
+	}
+
+	&.controls-visible .osd
+	{
+		opacity: 1;
+		pointer-events: all;
+	}
+
+	// AlwaysShowInfo: title + progress stay up, the buttons still hide
+	&.always-info .osd
+	{
+		opacity: 1;
+
+		.controls
+		{
+			opacity: 0;
+			transition: opacity 0.3s ease;
+		}
+	}
+
+	&.always-info.controls-visible .osd .controls
+	{
+		opacity: 1;
+	}
+
+	// The button under the crosshair - what USE will press
+	.btn.aimed
+	{
+		background-color: $accent;
+		transform: scale( 1.12 );
+	}
+
+	.progress.aimed
+	{
+		height: 22px;
+		background-color: rgba( 255, 255, 255, 0.35 );
+	}
+
+	// "Press E" dot. A direct child of the root, moved onto the aimed control from code
+	// (MediaScreen.UpdatePressDot sets left/top/display); centered on that point by the negative margins.
+	// the USE button's glyph (a key cap, or the pad's button), centred on the aimed control's corner
+	.press-dot
+	{
+		position: absolute;
+		display: none;
+		left: 0;
+		top: 0;
+		margin-left: -28px;
+		margin-top: -28px;
+		font-size: 44px;
+		pointer-events: none;
+		z-index: 100;
+	}
+
+	.flash
+	{
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		width: 220px;
+		height: 220px;
+		margin-left: -110px;
+		margin-top: -110px;
+		border-radius: 110px;
+		flex-direction: column;
+		justify-content: center;
+		align-items: center;
+		background-color: rgba( 0, 0, 0, 0.55 );
+		pointer-events: none;
+
+		i
+		{
+			font-size: 120px;
+		}
+
+		.flash-text
+		{
+			font-size: 30px;
+			font-weight: 700;
+			margin-top: -6px;
+		}
+	}
+
+	&.idle .osd
+	{
+		display: none;
+	}
+}
+
+.spectrumbars
+{
+	flex-direction: row;
+	align-items: flex-end;
+	gap: 6px;
+
+	.bar
+	{
+		flex-grow: 1;
+		height: 3%;
+		border-radius: 4px 4px 0 0;
+		background: linear-gradient( to top, #3fa9ff, #a36bff );
+	}
+}

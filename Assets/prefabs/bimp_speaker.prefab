@@ -1,0 +1,123 @@
+{
+  "RootObject": {
+    "__guid": "b1e0a002-0000-4000-8000-000000000001",
+    "__version": 1,
+    "Flags": 0,
+    "Name": "Media Speaker",
+    "Position": "0,0,0",
+    "Rotation": "0,0,0,1",
+    "Scale": "1,1,1",
+    "Tags": "mediaplayer",
+    "Enabled": true,
+    "NetworkMode": 1,
+    "Components": [
+      {
+        "__type": "Bimp.MediaPlayer",
+        "__guid": "b1e0a002-0000-4000-8000-000000000011",
+        "__enabled": true,
+        "Permission": "Anyone",
+        "AllowedSteamIds": [],
+        "AnyoneCanQueue": true,
+        "MaxQueue": 30,
+        "Loop": false,
+        "DefaultUrl": "",
+        "AudioOnlyPlayer": true,
+        "Volume": 0.8,
+        "Spatial": true,
+        "AudioDistance": 2000,
+        "SoundOrigin": null,
+        "ResolverUrlOverride": ""
+      },
+      {
+        "__type": "Bimp.MediaInteract",
+        "__guid": "b1e0a002-0000-4000-8000-000000000012",
+        "__enabled": true,
+        "Player": null
+      },
+      {
+        "__type": "Sandbox.BoxCollider",
+        "__guid": "b1e0a002-0000-4000-8000-000000000013",
+        "__enabled": true,
+        "Center": "0,0,20",
+        "IsTrigger": false,
+        "Scale": "20,30,40",
+        "Static": true,
+        "Surface": null
+      }
+    ],
+    "Children": [
+      {
+        "__guid": "b1e0a002-0000-4000-8000-000000000002",
+        "__version": 1,
+        "Flags": 0,
+        "Name": "Body",
+        "Position": "0,0,20",
+        "Rotation": "0,0,0,1",
+        "Scale": "0.4,0.6,0.8",
+        "Tags": "",
+        "Enabled": true,
+        "NetworkMode": 2,
+        "Components": [
+          {
+            "__type": "Sandbox.ModelRenderer",
+            "__guid": "b1e0a002-0000-4000-8000-000000000021",
+            "__enabled": true,
+            "BodyGroups": 18446744073709551615,
+            "MaterialGroup": null,
+            "MaterialOverride": null,
+            "Model": "models/dev/box.vmdl",
+            "RenderType": "On",
+            "Tint": "0.12,0.12,0.14,1"
+          }
+        ],
+        "Children": []
+      },
+      {
+        "__guid": "b1e0a002-0000-4000-8000-000000000003",
+        "__version": 1,
+        "Flags": 0,
+        "Name": "Display",
+        "Position": "10.2,0,30",
+        "Rotation": "0,0,0,1",
+        "Scale": "1,1,1",
+        "Tags": "",
+        "Enabled": true,
+        "NetworkMode": 2,
+        "Components": [
+          {
+            "__type": "Sandbox.WorldPanel",
+            "__guid": "b1e0a002-0000-4000-8000-000000000031",
+            "__enabled": true,
+            "HorizontalAlign": "Center",
+            "InteractionRange": 400,
+            "LookAtCamera": false,
+            "PanelSize": "560,280",
+            "RenderOptions": {
+              "GameLayer": true,
+              "OverlayLayer": false,
+              "BloomLayer": false,
+              "AfterUILayer": false
+            },
+            "RenderScale": 1,
+            "VerticalAlign": "Center"
+          },
+          {
+            "__type": "Bimp.MediaSpeaker",
+            "__guid": "b1e0a002-0000-4000-8000-000000000032",
+            "__enabled": true,
+            "Player": null
+          }
+        ],
+        "Children": []
+      }
+    ],
+    "__variables": []
+  },
+  "ShowInMenu": true,
+  "MenuPath": "Media/Speaker",
+  "MenuIcon": "speaker",
+  "DontBreakAsTemplate": false,
+  "ResourceVersion": 2,
+  "__references": [],
+  "__version": 2
+}

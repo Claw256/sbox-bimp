@@ -1,0 +1,110 @@
+{
+  "RootObject": {
+    "__guid": "b1e0a001-0000-4000-8000-000000000001",
+    "__version": 1,
+    "Flags": 0,
+    "Name": "Media Screen",
+    "Position": "0,0,0",
+    "Rotation": "0,0,0,1",
+    "Scale": "1,1,1",
+    "Tags": "mediaplayer",
+    "Enabled": true,
+    "NetworkMode": 1,
+    "Components": [
+      {
+        "__type": "Bimp.MediaPlayer",
+        "__guid": "b1e0a001-0000-4000-8000-000000000011",
+        "__enabled": true,
+        "Permission": "Anyone",
+        "AllowedSteamIds": [],
+        "AnyoneCanQueue": true,
+        "MaxQueue": 30,
+        "Loop": false,
+        "DefaultUrl": "",
+        "AudioOnlyPlayer": false,
+        "Volume": 0.8,
+        "Spatial": true,
+        "AudioDistance": 2500,
+        "SoundOrigin": null,
+        "ResolverUrlOverride": ""
+      },
+      {
+        "__type": "Bimp.MediaInteract",
+        "__guid": "b1e0a001-0000-4000-8000-000000000012",
+        "__enabled": true,
+        "Player": null
+      },
+      {
+        "__type": "Sandbox.BoxCollider",
+        "__guid": "b1e0a001-0000-4000-8000-000000000013",
+        "__enabled": true,
+        "Center": "-2,0,0",
+        "IsTrigger": false,
+        "Scale": "6,100,58",
+        "Static": true,
+        "Surface": null
+      },
+      {
+        "__type": "Sandbox.WorldPanel",
+        "__guid": "b1e0a001-0000-4000-8000-000000000014",
+        "__enabled": true,
+        "HorizontalAlign": "Center",
+        "InteractionRange": 600,
+        "LookAtCamera": false,
+        "PanelSize": "1920,1080",
+        "RenderOptions": {
+          "GameLayer": true,
+          "OverlayLayer": false,
+          "BloomLayer": false,
+          "AfterUILayer": false
+        },
+        "RenderScale": 1,
+        "VerticalAlign": "Center"
+      },
+      {
+        "__type": "Bimp.MediaScreen",
+        "__guid": "b1e0a001-0000-4000-8000-000000000015",
+        "__enabled": true,
+        "Player": null,
+        "IdleText": "Media Player",
+        "AlwaysShowInfo": false
+      }
+    ],
+    "Children": [
+      {
+        "__guid": "b1e0a001-0000-4000-8000-000000000002",
+        "__version": 1,
+        "Flags": 0,
+        "Name": "Frame",
+        "Position": "-3,0,0",
+        "Rotation": "0,0,0,1",
+        "Scale": "0.08,2,1.16",
+        "Tags": "",
+        "Enabled": true,
+        "NetworkMode": 2,
+        "Components": [
+          {
+            "__type": "Sandbox.ModelRenderer",
+            "__guid": "b1e0a001-0000-4000-8000-000000000021",
+            "__enabled": true,
+            "BodyGroups": 18446744073709551615,
+            "MaterialGroup": null,
+            "MaterialOverride": null,
+            "Model": "models/dev/box.vmdl",
+            "RenderType": "On",
+            "Tint": "0.05,0.05,0.06,1"
+          }
+        ],
+        "Children": []
+      }
+    ],
+    "__variables": []
+  },
+  "ShowInMenu": true,
+  "MenuPath": "Media/Screen",
+  "MenuIcon": "smart_display",
+  "DontBreakAsTemplate": false,
+  "ResourceVersion": 2,
+  "__references": [],
+  "__version": 2
+}

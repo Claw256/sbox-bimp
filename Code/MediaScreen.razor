@@ -1,0 +1,683 @@
+@using System
+@using Sandbox
+@using Sandbox.UI
+@namespace Bimp
+@inherits PanelComponent
+@implements Component.ExecuteInEditor
+
+@*
+	The screen itself. Put this on a GameObject with a WorldPanel (PanelSize 1920x1080 works well).
+	Shows the video, and point-and-click controls when a player looks at it. The controls hide after a
+	few seconds and stay hidden for as long as you keep looking, however you move - they only come back
+	when you look away and back again. Clicking needs a WorldInput on the camera (added automatically).
+
+	USE (E) while aiming at a visible button presses it; USE anywhere else opens the full remote
+	(MediaInteract asks TryPressAimedControl first).
+*@
+
+<root class="@RootClass">
+
+	<div class="video" @ref="VideoSurface"></div>
+
+	@if ( Player is null || !Player.HasMedia )
+	{
+		<div class="splash">
+			<i>smart_display</i>
+			<div class="title">@(string.IsNullOrWhiteSpace( IdleText ) ? "Media Player" : IdleText)</div>
+			@if ( !string.IsNullOrWhiteSpace( Player?.Status ) )
+			{
+				<div class="status">@Player.Status</div>
+			}
+			else
+			{
+				@* separate pieces in a row: text either side of an element lost its spaces ("PressUSEto open") *@
+				<div class="hint"><span>Press</span><InputGlyph Action="@UseAction"></InputGlyph><span>to open the controls</span></div>
+			}
+		</div>
+	}
+	else if ( ShowAudioVisual )
+	{
+		<div class="audio">
+			<i>graphic_eq</i>
+			<ScrollingText class="title" Text="@Player.Title"></ScrollingText>
+			<SpectrumBars Player="@Player"></SpectrumBars>
+		</div>
+	}
+
+	@if ( Player is not null && Player.HasMedia )
+	{
+		@if ( Player.Backend is not null && !Player.Backend.Loaded && Player.Backend.Error is null )
+		{
+			<div class="loading"><i>hourglass_top</i> Loading...</div>
+		}
+
+		@if ( FlashIcon is not null )
+		{
+			<div class="flash">
+				<i>@FlashIcon</i>
+				@if ( !string.IsNullOrEmpty( FlashText ) )
+				{
+					<div class="flash-text">@FlashText</div>
+				}
+			</div>
+		}
+
+		<div class="osd">
+			<div class="meta">
+				<ScrollingText class="title" Text="@Player.Title"></ScrollingText>
+				<div class="time">@TimeText</div>
+			</div>
+
+			@if ( !Player.IsLive )
+			{
+				<div class="progress @AimedClass( "progress" )" @ref="SeekBar" onclick=@((Action<PanelEvent>)OnSeekBarClick)>
+					<div class="fill" @ref="SeekFill"></div>
+				</div>
+			}
+			else
+			{
+				<div class="live"><i>sensors</i> LIVE</div>
+			}
+
+			<div class="controls">
+				@if ( Player.CanLocalControl )
+				{
+					@if ( !Player.IsLive )
+					{
+						<div class="btn back @AimedClass( "back" )" onclick="@SeekBack"><i>replay_10</i></div>
+						<div class="btn playpause @AimedClass( "playpause" )" onclick="@TogglePause"><i>@(Player.Paused ? "play_arrow" : "pause")</i></div>
+						<div class="btn forward @AimedClass( "forward" )" onclick="@SeekForward"><i>forward_10</i></div>
+					}
+					<div class="btn next @AimedClass( "next" )" onclick="@Next"><i>skip_next</i></div>
+					<div class="btn stop @AimedClass( "stop" )" onclick="@Stop"><i>stop</i></div>
+				}
+				<div class="spacer"></div>
+				@if ( Player.Queue.Count > 0 )
+				{
+					<div class="queue-count"><i>queue_music</i> @Player.Queue.Count</div>
+				}
+				@if ( !string.IsNullOrWhiteSpace( Player.RequestedBy ) )
+				{
+					<div class="by">Requested by @Player.RequestedBy</div>
+				}
+			</div>
+		</div>
+	}
+
+	@if ( !string.IsNullOrWhiteSpace( Player?.LocalNotice ) )
+	{
+		<div class="notice">@Player.LocalNotice</div>
+	}
+
+	@* "Press E" dot: the USE button's glyph. Always in the tree (last, so it draws on top); UpdatePressDot shows
+	   it and moves it onto the aimed control every frame. *@
+	<div class="press-dot" @ref="PressDot"><InputGlyph Action="@UseAction"></InputGlyph></div>
+
+</root>
+
+@code
+{
+	/// <summary>
+	/// The player this screen shows. Found automatically in this object or its parents if unset.
+	/// </summary>
+	[Property] public MediaPlayer Player { get; set; }
+
+	/// <summary>
+	/// Text shown when nothing is playing.
+	/// </summary>
+	[Property] public string IdleText { get; set; } = "Media Player";
+
+	/// <summary>
+	/// Scale the UI to fit the WorldPanel's PanelSize, so it looks the same (just smaller or bigger) at any
+	/// screen size instead of getting cut off. Sets the WorldPanel's RenderScale.
+	/// </summary>
+	[Property, Group( "Layout" )] public bool FitToPanel { get; set; } = true;
+
+	/// <summary>
+	/// The panel size the UI is designed for. With FitToPanel, the UI is laid out at this size and scaled.
+	/// </summary>
+	[Property, Group( "Layout" ), ShowIf( nameof( FitToPanel ), true )] public Vector2 DesignSize { get; set; } = new Vector2( 1920, 1080 );
+
+	/// <summary>
+	/// Size the screen (the WorldPanel's PanelSize) to the screen's model - the frame / TV you see -
+	/// so resizing or swapping the model resizes the picture and UI with it. Updates live in the editor.
+	/// </summary>
+	[Property, Group( "Layout" )] public bool FitToObject { get; set; } = true;
+
+	/// <summary>
+	/// The model to fit to. Defaults to the first ModelRenderer on this object or its children.
+	/// </summary>
+	[Property, Group( "Layout" ), ShowIf( nameof( FitToObject ), true )] public ModelRenderer SizeFrom { get; set; }
+
+	/// <summary>
+	/// Border left around the picture on each side, in world units (the frame's bezel).
+	/// </summary>
+	[Property, Group( "Layout" ), ShowIf( nameof( FitToObject ), true ), Range( 0, 20 )] public float Bezel { get; set; } = 2.0f;
+
+	/// <summary>
+	/// Also fit this object's BoxCollider to the model, so USE / looking works over the whole screen.
+	/// </summary>
+	[Property, Group( "Layout" ), ShowIf( nameof( FitToObject ), true )] public bool FitCollider { get; set; } = true;
+
+	bool warnedOffCenter;
+
+	void FitToScreenObject()
+	{
+		var model = SizeFrom.IsValid() ? SizeFrom
+			: Components.GetAll<ModelRenderer>( FindMode.EnabledInSelfAndDescendants ).FirstOrDefault( m => m.Model is not null );
+		if ( model is null ) return;
+
+		var bounds = PanelFit.FitToModel( this, model, Bezel, FitCollider );
+
+		// The panel is always centered on this object - tell the mapper if their model isn't
+		if ( bounds is BBox b && !warnedOffCenter && new Vector2( b.Center.y, b.Center.z ).Length > MathF.Max( 2, b.Size.y * 0.05f ) )
+		{
+			warnedOffCenter = true;
+			Log.Warning( $"[bimp] {GameObject.Name}: the screen model isn't centered on the Media Screen object, the picture will be offset. Move the model so its face is centered on the object." );
+		}
+	}
+
+	/// <summary>
+	/// Show the title/progress bar all the time.
+	/// </summary>
+	[Property, Group( "Controls" )] public bool AlwaysShowInfo { get; set; } = false;
+
+	/// <summary>
+	/// Hide the controls this many seconds after you start looking at the screen, last press a button, or
+	/// move your aim off a button (they never time out while you're aiming at one). Once hidden they stay
+	/// hidden while you keep looking, and come back when you look away and back. 0 = never hide.
+	/// </summary>
+	[Property, Group( "Controls" ), Range( 0, 30 )] public float HideControlsAfter { get; set; } = 3.0f;
+
+	/// <summary>
+	/// How long you have to look away before looking back shows the controls again. Stops them flickering
+	/// back when your aim just grazes the edge of the screen.
+	/// </summary>
+	[Property, Group( "Controls" ), Range( 0, 2 )] public float LookAwayTime { get; set; } = 0.3f;
+
+	/// <summary>
+	/// Keep the controls up while paused (like most video players).
+	/// </summary>
+	[Property, Group( "Controls" )] public bool ShowControlsWhilePaused { get; set; } = true;
+
+	/// <summary>
+	/// How far away you can be for looking at the screen to count. Uses the WorldPanel's interaction range if 0.
+	/// </summary>
+	[Property, Group( "Controls" )] public float LookRange { get; set; } = 0;
+
+	/// <summary>
+	/// Don't count looking at the screen through walls.
+	/// </summary>
+	[Property, Group( "Controls" )] public bool CheckLineOfSight { get; set; } = true;
+
+	/// <summary>
+	/// Add a WorldInput to the camera if the scene doesn't have one, so the buttons can be clicked.
+	/// </summary>
+	[Property, Group( "Controls" )] public bool AddWorldInput { get; set; } = true;
+
+	/// <summary>
+	/// The input action that presses the aimed button, or opens the full remote. Works from anywhere you can
+	/// point at the screen (LookRange), not just the PlayerController's short reach.
+	/// </summary>
+	[Property, Group( "Controls" ), InputAction] public string UseAction { get; set; } = "use";
+
+	/// <summary> Seconds jumped by the back / forward buttons. </summary>
+	[Property, Group( "Controls" ), Range( 1, 60 )] public float SeekStep { get; set; } = 10;
+
+	/// <summary>
+	/// Is the local player looking at (or pointing the mouse at) this screen right now?
+	/// </summary>
+	public bool IsLookedAt { get; private set; }
+
+	/// <summary>
+	/// Are the controls showing right now?
+	/// </summary>
+	public bool ControlsVisible { get; private set; }
+
+	Panel VideoSurface { get; set; }
+	Panel SeekBar { get; set; }
+	Panel SeekFill { get; set; }
+
+	RealTimeSince sinceChanged = 0;
+	RealTimeSince sinceActivity = 100;
+	RealTimeSince sinceLookedAway = 100;
+	string lastTitle;
+
+	string FlashIcon;
+	string FlashText;
+	int flashId;
+	RealTimeSince sinceFlash = 100;
+
+	bool ShowAudioVisual => Player.AudioOnly || (Player.Backend is not null && Player.Backend.Loaded && !Player.Backend.HasVideo);
+
+	string RootClass
+	{
+		get
+		{
+			var c = "mediascreen";
+			if ( Player is null || !Player.HasMedia ) c += " idle";
+			if ( Player?.Paused ?? false ) c += " paused";
+			if ( ControlsVisible ) c += " controls-visible";
+			if ( AlwaysShowInfo ) c += " always-info";
+			return c;
+		}
+	}
+
+	string TimeText
+	{
+		get
+		{
+			if ( Player.IsLive ) return "Live";
+			var cur = MediaSource.FormatTime( Player.CurrentTime );
+			return Player.MediaDuration > 0 ? $"{cur} / {MediaSource.FormatTime( Player.MediaDuration )}" : cur;
+		}
+	}
+
+	protected override void OnStart()
+	{
+		base.OnStart();
+		Player ??= GetComponentInParent<MediaPlayer>();
+	}
+
+	protected override void OnUpdate()
+	{
+		if ( FitToObject ) FitToScreenObject();
+		if ( FitToPanel ) PanelFit.Apply( this, DesignSize );
+
+		// In the editor we only keep the layout fitted, so the scene view shows the real result
+		if ( Scene.IsEditor ) return;
+
+		Player ??= GetComponentInParent<MediaPlayer>();
+
+		if ( Player?.Title != lastTitle )
+		{
+			lastTitle = Player?.Title;
+			sinceChanged = 0;
+		}
+
+		if ( VideoSurface.IsValid() )
+		{
+			var backend = Player?.Backend;
+			var tex = backend is not null && backend.HasVideo && !Player.AudioOnly ? backend.Texture : null;
+			VideoSurface.Style.SetBackgroundImage( tex );
+		}
+
+		if ( SeekFill.IsValid() && Player is not null && Player.MediaDuration > 0 )
+		{
+			SeekFill.Style.Width = Length.Percent( (Player.CurrentTime / Player.MediaDuration * 100.0f).Clamp( 0, 100 ) );
+		}
+
+		EnsureWorldInput();
+		UpdateLook();
+		UpdateVisibility();
+		UpdateUse();
+		UpdatePressDot();
+
+		if ( FlashIcon is not null && sinceFlash > 0.8f )
+			FlashIcon = null;
+	}
+
+	#region Looking at the screen
+
+	void UpdateLook()
+	{
+		var wasLooking = IsLookedAt;
+		IsLookedAt = TryGetLookPoint( out lookPoint );
+
+		// Which button the crosshair is on - highlighted, and what USE presses
+		Panel aimed = null;
+		var previous = AimedControl;
+		AimedControl = IsLookedAt && ControlsVisible ? FindControlAt( lookPoint, out aimed ) : null;
+		aimedPanel = aimed;
+
+		if ( MediaSettings.Debug && (AimedControl != previous || wasLooking != IsLookedAt) )
+		{
+			var layout = Panel.IsValid() ? LayoutPos( lookPoint ) : default;
+			Log.Info( $"[bimp] {GameObject.Name}: looking={IsLookedAt} controls={ControlsVisible} aim={lookPoint:0} (layout {layout:0}, root {Panel?.Box.Rect}) -> {AimedControl ?? "nothing"}" +
+				(aimed.IsValid() ? $" rect {aimed.Box.Rect}" : "") );
+		}
+
+		if ( AimedControl == "progress" && aimed.IsValid() && aimed.Box.Rect.Width > 0 )
+			AimedFraction = ((LayoutPos( lookPoint ).x - aimed.Box.Rect.Left) / aimed.Box.Rect.Width).Clamp( 0, 1 );
+
+		// No timeout while hovering a button - the countdown only starts once you move off it
+		if ( AimedControl is not null )
+			Activity();
+
+		if ( !IsLookedAt )
+		{
+			if ( wasLooking ) sinceLookedAway = 0;
+			return;
+		}
+
+		// Only (re)starting to look shows the controls. Moving around, or moving your aim across the
+		// screen, while you keep looking doesn't - once they've timed out they stay hidden until you
+		// look away (for at least LookAwayTime) and come back.
+		if ( !wasLooking && sinceLookedAway >= LookAwayTime )
+			Activity();
+	}
+
+	/// <summary>
+	/// Where on the panel (in panel pixels, 0,0 top left) the local camera or mouse cursor points, if it's on the screen.
+	/// </summary>
+	bool TryGetLookPoint( out Vector2 point )
+	{
+		point = default;
+
+		var camera = Scene.Camera;
+		var worldPanel = Components.Get<Sandbox.WorldPanel>();
+		if ( camera is null || worldPanel is null || !worldPanel.Enabled ) return false;
+		if ( MediaRemote.IsOpen( Scene ) ) return false;
+
+		var ray = Mouse.Active ? camera.ScreenPixelToRay( Mouse.Position ) : new Ray( camera.WorldPosition, camera.WorldRotation.Forward );
+		var range = LookRange > 0 ? LookRange : worldPanel.InteractionRange;
+
+		var plane = new Plane( WorldPosition, WorldRotation.Forward );
+		if ( plane.Trace( ray, true, range ) is not Vector3 hit ) return false;
+
+		// The panel's x runs along our local +Y, its y down our local -Z, in ScreenToWorldScale units
+		var local = WorldTransform.PointToLocal( hit );
+		var scale = Sandbox.UI.WorldPanel.ScreenToWorldScale;
+		var p = new Vector2( local.y / scale, -local.z / scale );
+
+		var size = worldPanel.PanelSize;
+		var origin = Vector2.Zero;
+		if ( worldPanel.HorizontalAlign == Sandbox.WorldPanel.HAlignment.Center ) origin.x = -size.x * 0.5f;
+		if ( worldPanel.HorizontalAlign == Sandbox.WorldPanel.HAlignment.Right ) origin.x = -size.x;
+		if ( worldPanel.VerticalAlign == Sandbox.WorldPanel.VAlignment.Center ) origin.y = -size.y * 0.5f;
+		if ( worldPanel.VerticalAlign == Sandbox.WorldPanel.VAlignment.Bottom ) origin.y = -size.y;
+
+		p -= origin;
+		if ( p.x < 0 || p.y < 0 || p.x > size.x || p.y > size.y ) return false;
+
+		if ( CheckLineOfSight && IsBlocked( ray.Position, hit ) ) return false;
+
+		point = p;
+		return true;
+	}
+
+	bool IsBlocked( Vector3 from, Vector3 to )
+	{
+		var dir = (to - from).Normal;
+		var trace = Scene.Trace.Ray( from, to - dir * 4.0f ).IgnoreGameObjectHierarchy( GameObject.Root );
+
+		// third person cameras look through the local player's own body
+		var local = Scene.GetAllComponents<PlayerController>().FirstOrDefault( p => !p.IsProxy );
+		if ( local.IsValid() ) trace = trace.IgnoreGameObjectHierarchy( local.GameObject );
+
+		return trace.Run().Hit;
+	}
+
+	/// <summary> For probes: why the controls are (or aren't) showing. </summary>
+	internal string DescribeControls() => $"looked={IsLookedAt} visible={ControlsVisible} aimed={AimedControl ?? "-"} sinceActivity={(float)sinceActivity:0.0} sinceChanged={(float)sinceChanged:0.0} paused={Player?.Paused} mouseActive={Mouse.Active} mouse={Mouse.Position:0} controller={Input.UsingController} virtualCursor={Input.EnableVirtualCursor} root=[{Panel?.Classes}] osd=" +
+		string.Join( ", ", Panel?.Descendants.Where( p => p.HasClass( "osd" ) || p.HasClass( "meta" ) || p.HasClass( "title" ) || p.HasClass( "time" ) ).Select( p => $"{p.ElementName}.{string.Join( ".", p.Class )} opacity {p.ComputedStyle?.Opacity}" ) ?? Enumerable.Empty<string>() );
+
+	void Activity()
+	{
+		sinceActivity = 0;
+	}
+
+	//
+	// Aiming at the on-screen buttons (for pressing them with USE)
+	//
+
+	Vector2 lookPoint;
+
+	/// <summary>
+	/// The control under the local player's crosshair, if the controls are showing:
+	/// "back", "playpause", "forward", "next", "stop" or "progress". Null otherwise.
+	/// </summary>
+	public string AimedControl { get; private set; }
+
+	static readonly string[] ControlNames = { "back", "playpause", "forward", "next", "stop", "progress" };
+
+	string AimedClass( string name ) => AimedControl == name ? "aimed" : "";
+
+	/// <summary>
+	/// Where along the progress bar the crosshair is (0-1), when aiming at it.
+	/// </summary>
+	public float AimedFraction { get; private set; }
+
+	Panel PressDot { get; set; }
+	Panel aimedPanel;
+
+	/// <summary>
+	/// Show the "press E" dot on the aimed control: its top-right corner for buttons, above the aimed spot
+	/// for the progress bar. Positioned from the control's layout rect (screen space) converted back to
+	/// our CSS pixels, so it's right at any PanelSize / RenderScale.
+	/// </summary>
+	void UpdatePressDot()
+	{
+		if ( !PressDot.IsValid() ) return;
+
+		var root = Panel;
+		if ( AimedControl is null || !aimedPanel.IsValid() || !root.IsValid() )
+		{
+			PressDot.Style.Display = DisplayMode.None;
+			return;
+		}
+
+		var r = aimedPanel.Box.Rect;
+		var onBar = AimedControl == "progress";
+		var anchor = onBar ? new Vector2( LayoutPos( lookPoint ).x, r.Top ) : new Vector2( r.Right, r.Top );
+
+		var local = (anchor - root.Box.Rect.Position) * root.ScaleFromScreen;
+		if ( onBar ) local.y -= 40; // sit above the bar
+
+		PressDot.Style.Display = DisplayMode.Flex;
+		PressDot.Style.Left = Length.Pixels( local.x );
+		PressDot.Style.Top = Length.Pixels( local.y );
+	}
+
+	/// <summary>
+	/// A human readable name for what pressing USE on the aimed control does, for tooltips.
+	/// </summary>
+	public string AimedActionName => AimedControl switch
+	{
+		"back" => $"Back {SeekStep:0}s",
+		"playpause" => Player?.Paused == true ? "Play" : "Pause",
+		"forward" => $"Forward {SeekStep:0}s",
+		"next" => "Next",
+		"stop" => "Stop",
+		"progress" => "Seek here",
+		_ => null,
+	};
+
+	/// <summary>
+	/// Find the control at a point on the panel (in PanelSize pixels, see TryGetLookPoint).
+	/// <paramref name="control"/> is the control's panel.
+	/// </summary>
+	string FindControlAt( Vector2 point, out Panel control )
+	{
+		control = null;
+		var root = Panel;
+		if ( !root.IsValid() ) return null;
+
+		var pos = LayoutPos( point );
+
+		foreach ( var p in root.Descendants )
+		{
+			if ( !p.HasClass( "btn" ) && !p.HasClass( "progress" ) ) continue;
+			if ( !p.IsVisible || !p.IsInside( pos ) ) continue;
+
+			var name = ControlNames.FirstOrDefault( p.HasClass );
+			if ( name is null ) continue;
+
+			control = p;
+			return name;
+		}
+
+		return null;
+	}
+
+	/// <summary>
+	/// USE while looking at the screen: press the aimed button, else open the full remote.
+	/// </summary>
+	void UpdateUse()
+	{
+		if ( !IsLookedAt || Player is null || string.IsNullOrWhiteSpace( UseAction ) ) return;
+		if ( !Input.Pressed( UseAction ) ) return;
+
+		// A PlayerController in reach may also press our MediaInteract this frame - only act once
+		if ( !UseHandled.TryConsume() ) return;
+
+		if ( !TryPressAimedControl() )
+			MediaRemote.Toggle( Player );
+	}
+
+	/// <summary>
+	/// Press whatever on-screen control the local player is aiming at. Returns false if they aren't
+	/// aiming at one (or the controls are hidden) - the caller then opens the full remote instead.
+	/// </summary>
+	public bool TryPressAimedControl()
+	{
+		if ( Player is null || !Player.HasMedia || !ControlsVisible ) return false;
+		if ( !TryGetLookPoint( out var point ) ) return false;
+
+		var name = FindControlAt( point, out var control );
+		if ( name is null ) return false;
+
+		switch ( name )
+		{
+			case "back": SeekBack(); break;
+			case "playpause": TogglePause(); break;
+			case "forward": SeekForward(); break;
+			case "next": Next(); break;
+			case "stop": Stop(); break;
+			case "progress":
+				Activity();
+				if ( Player.CanLocalControl && Player.MediaDuration > 0 )
+				{
+					var pos = LayoutPos( point );
+					var frac = ((pos.x - control.Box.Rect.Left) / control.Box.Rect.Width).Clamp( 0, 1 );
+					Flash( "fast_forward", MediaSource.FormatTime( frac * Player.MediaDuration ) );
+					Player.RequestSeek( frac * Player.MediaDuration );
+				}
+				break;
+		}
+
+		return true;
+	}
+
+	/// <summary>
+	/// PanelSize pixels -> the panel's layout coordinates. Going through the root panel's own rect keeps this
+	/// right whatever the RenderScale (FitToPanel) or alignment is.
+	/// </summary>
+	Vector2 LayoutPos( Vector2 point )
+	{
+		var size = Components.Get<Sandbox.WorldPanel>()?.PanelSize ?? Vector2.One;
+		var rect = Panel.Box.Rect;
+		return rect.Position + new Vector2( point.x / size.x * rect.Width, point.y / size.y * rect.Height );
+	}
+
+	void UpdateVisibility()
+	{
+		var hasMedia = Player?.HasMedia ?? false;
+		var recentlyActive = HideControlsAfter <= 0 ? IsLookedAt : sinceActivity < HideControlsAfter;
+
+		ControlsVisible = hasMedia && (
+			(IsLookedAt && recentlyActive) ||
+			(ShowControlsWhilePaused && Player.Paused) ||
+			sinceChanged < 4 );
+	}
+
+	// A click while the controls are up keeps them up for another HideControlsAfter. Clicks on a screen whose
+	// controls have timed out don't bring them back (the hidden controls don't take clicks either).
+	protected override void OnMouseDown( MousePanelEvent e )
+	{
+		if ( ControlsVisible ) Activity();
+	}
+
+	void EnsureWorldInput()
+	{
+		if ( !AddWorldInput || Scene.Camera is null ) return;
+		if ( Scene.GetAllComponents<Sandbox.WorldInput>().Any() ) return;
+
+		var input = Scene.Camera.GameObject.Components.Create<Sandbox.WorldInput>();
+		input.Flags |= ComponentFlags.NotSaved | ComponentFlags.NotNetworked;
+	}
+
+	#endregion
+
+	#region Controls
+
+	bool CanAct()
+	{
+		Activity();
+		if ( Player is null || !Player.HasMedia ) return false;
+		if ( Player.CanLocalControl ) return true;
+
+		Flash( "lock", "No permission" );
+		return false;
+	}
+
+	void TogglePause()
+	{
+		if ( !CanAct() || Player.IsLive ) return;
+		Flash( Player.Paused ? "play_arrow" : "pause" );
+		Player.RequestSetPaused( !Player.Paused );
+	}
+
+	void SeekBack()
+	{
+		if ( !CanAct() || Player.IsLive ) return;
+		Flash( "replay_10", $"-{SeekStep:0}s" );
+		Player.RequestSeek( Player.CurrentTime - SeekStep );
+	}
+
+	void SeekForward()
+	{
+		if ( !CanAct() || Player.IsLive ) return;
+		Flash( "forward_10", $"+{SeekStep:0}s" );
+		Player.RequestSeek( Player.CurrentTime + SeekStep );
+	}
+
+	void Next()
+	{
+		if ( !CanAct() ) return;
+		Flash( "skip_next", Player.Queue.Count > 0 ? "Next" : "End of queue" );
+		Player.RequestSkip();
+	}
+
+	void Stop()
+	{
+		if ( !CanAct() ) return;
+		Flash( "stop" );
+		Player.RequestStop();
+	}
+
+	void Flash( string icon, string text = null )
+	{
+		FlashIcon = icon;
+		FlashText = text;
+		flashId++;
+		sinceFlash = 0;
+	}
+
+	void OnSeekBarClick( PanelEvent e )
+	{
+		if ( !ControlsVisible ) return;
+		Activity();
+		if ( Player is null || !Player.CanLocalControl || Player.MediaDuration <= 0 ) return;
+		if ( e is not MousePanelEvent me || !SeekBar.IsValid() ) return;
+
+		var width = SeekBar.Box.Rect.Width;
+		if ( width <= 0 ) return;
+
+		var frac = (me.LocalPosition.x / width).Clamp( 0, 1 );
+		Player.RequestSeek( frac * Player.MediaDuration );
+	}
+
+	#endregion
+
+	protected override int BuildHash()
+	{
+		if ( Player is null ) return 0;
+
+		return HashCode.Combine(
+			HashCode.Combine( Player.PlayId, Player.HasMedia, Player.Title, Player.Paused, Player.Status, Player.LocalNotice, Player.Queue.Count ),
+			HashCode.Combine( (int)Player.CurrentTime, Player.MediaDuration, Player.Backend?.Loaded, Player.Backend?.HasVideo, Player.CanLocalControl, RootClass ),
+			HashCode.Combine( FlashIcon, flashId, AimedControl, UseAction )
+		);
+	}
+}
