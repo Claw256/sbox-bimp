@@ -4,7 +4,7 @@ Thanks for helping. Bug reports, fixes and new site extractors are all welcome.
 
 ## Getting set up
 
-1. Install [s&box](https://sbox.game) and open `bimp.sbproj` in the editor. It's a **library** project, not a game.
+1. Install [s&box](https://sbox.game) and open `bimp.sbproj` in the editor. It's a **library** project (`rexi/bimp`), not a game.
 2. Open `scenes/mediaplayer_test.scene`: it has a screen, a speaker and a single-player controller.
 3. Press play, look at the screen and press USE to open the remote, or use the console commands below.
 
