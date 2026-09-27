@@ -178,10 +178,9 @@ public sealed class MediaPlayer : Component
 	}
 
 	/// <summary>
-	/// The scene's shared resolver (host only).
+	/// The shared resolver (host only).
 	/// </summary>
-	BimpResolverSystem Resolver => BimpResolverSystem.Get( Scene )
-		?? throw new ResolveException( "The media resolver isn't running in this scene (restart it after a code update)." );
+	static BimpResolver Resolver => BimpResolver.Instance;
 
 	public Vector3 SoundPosition => SoundOrigin.IsValid() ? SoundOrigin.WorldPosition : WorldPosition;
 

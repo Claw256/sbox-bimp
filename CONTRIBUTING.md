@@ -22,7 +22,7 @@ UI, input and `VideoPlayer` behave.
 | `Code/MediaInteract.cs`, `UseHandled.cs` | USE handling |
 | `Code/MediaSettings.cs` | Console variables |
 | `Code/MediaProbe.cs`, `LatencyLab.cs` | Diagnostic console commands |
-| `Code/Resolver/` | Link resolving: `BimpResolverSystem` (host), `PlayToken` (per-client sessions), `FormatSelector` |
+| `Code/Resolver/` | Link resolving: `BimpResolver` (host), `PlayToken` (per-client sessions), `FormatSelector` |
 | `Code/Resolver/Extractors/` | One extractor per site (YouTube, Twitch, Kick, Vimeo, SoundCloud, HLS...) |
 | `Code/Resolver/Media/` | WebM/MP4 parsing and writing, range downloads, the YouTube segmenter |
 | `Code/Resolver/Live/` | Live ingest: RTSP tunnel, HLS, MPEG-TS, AAC decoding, live segmenter |

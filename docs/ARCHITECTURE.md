@@ -50,7 +50,8 @@ Resolution and audio language are local choices. Each client adds `&h=` / `&lang
 The resolver is plain C# inside the library, within the s&box code whitelist. It needs no external service, no
 yt-dlp and no ffmpeg. There are two halves:
 
-- **`BimpResolverSystem`** is a `GameObjectSystem`, so every scene has exactly one. It does nothing until a media
+- **`BimpResolver`** is a single shared object, made on first use (not a scene system, so it also exists when BIMP
+  is loaded into a game that's already running, like an addon spawned in Sandbox). It does nothing until a media
   player asks, and only runs on the host. It works out a link's title, duration, qualities and dubs, caches them for
   30 minutes (so ten people queueing the same link resolve it once), and syncs a **play token** such as
   `bimp:yt/aqz-KE-bpKQ?mode=av&maxh=720` through the player's queue item.

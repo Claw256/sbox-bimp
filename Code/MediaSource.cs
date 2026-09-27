@@ -6,7 +6,7 @@ namespace Bimp;
 
 /// <summary>
 /// Url helpers. Direct media files are played as-is; YouTube and the other sites the native resolver
-/// understands go through <see cref="Resolver.BimpResolverSystem"/>.
+/// understands go through <see cref="Resolver.BimpResolver"/>.
 /// </summary>
 public static class MediaSource
 {

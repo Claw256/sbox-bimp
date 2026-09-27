@@ -4,17 +4,26 @@ using Bimp.Resolver.Extractors;
 namespace Bimp.Resolver;
 
 /// <summary>
-/// The scene's shared media resolver. There's exactly one per scene; it does nothing until a
+/// The shared media resolver. There's exactly one (<see cref="Instance"/>); it does nothing until a
 /// <see cref="MediaPlayer"/> asks it for something, and only ever runs on the host - clients send their
 /// requests to the host through the player's RPCs, and get the result through its synced state.
+/// <para>
+/// It's a plain object made on first use, not a scene system: a scene creates its systems once, from the types loaded
+/// when it starts, so when BIMP arrives later - an addon spawned into a running Sandbox game - a scene system would
+/// never exist, and nothing could be played.
+/// </para>
 /// <para>
 /// It works out what a url is (title, duration, qualities, dubs) and turns it into a queue item whose play url
 /// is a <see cref="PlayToken"/>. It never hands out stream urls: those are tied to the IP that asked for them,
 /// so each client resolves its own (see <see cref="StreamSessions"/>).
 /// </para>
 /// </summary>
-public sealed class BimpResolverSystem : GameObjectSystem<BimpResolverSystem>
+public sealed class BimpResolver
 {
+	/// <summary> The resolver, made on first use. Its cache holds link info, which doesn't depend on the scene. </summary>
+	public static BimpResolver Instance => instance ??= new BimpResolver();
+	static BimpResolver instance;
+
 	const float InfoLifetime = 60 * 30;
 	const int MaxCached = 500;
 
@@ -26,10 +35,6 @@ public sealed class BimpResolverSystem : GameObjectSystem<BimpResolverSystem>
 
 	/// <summary> Results (and requests in flight, so two people queueing the same link resolve it once). </summary>
 	readonly Dictionary<string, Cached> cache = new();
-
-	public BimpResolverSystem( Scene scene ) : base( scene )
-	{
-	}
 
 	/// <summary>
 	/// Resolve what the user typed into a playable queue item. Host only.
