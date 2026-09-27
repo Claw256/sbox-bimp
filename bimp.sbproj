@@ -1,10 +1,10 @@
 {
-  "Title": "bimp Media Player",
+  "Title": "Bimp Media Player",
   "Type": "library",
   "Org": "rexi",
   "Ident": "bimp",
   "Schema": 1,
-  "IncludeSourceFiles": true,
+  "IncludeSourceFiles": false,
   "Resources": null,
   "PackageReferences": [],
   "EditorReferences": null,

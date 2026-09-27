@@ -593,10 +593,9 @@
           "OnComponentStart": null,
           "OnComponentUpdate": null,
           "Permission": "Anyone",
-          "ResolverUrlOverride": "",
           "SoundOrigin": null,
           "Spatial": true,
-          "Volume": 0.8
+          "Volume": 1
         },
         {
           "__type": "Bimp.MediaInteract",
@@ -609,7 +608,8 @@
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
           "OnComponentUpdate": null,
-          "Player": null
+          "Player": null,
+          "Screen": null
         },
         {
           "__type": "Sandbox.BoxCollider",
@@ -658,7 +658,7 @@
             "BloomLayer": false,
             "AfterUILayer": false
           },
-          "RenderScale": 1,
+          "RenderScale": 0.5,
           "VerticalAlign": "Center"
         },
         {
@@ -666,15 +666,34 @@
           "__guid": "149ce5ac-c18e-4b6a-9dff-74745428d8bc",
           "__enabled": true,
           "Flags": 0,
+          "AddWorldInput": true,
           "AlwaysShowInfo": false,
+          "Bezel": 2,
+          "CheckLineOfSight": true,
+          "DesignSize": "1920,1080",
+          "FitCollider": true,
+          "FitToObject": true,
+          "FitToPanel": true,
+          "HideControlsAfter": 3,
           "IdleText": "Media Player",
+          "LookAwayTime": 0.3,
+          "LookRange": 0,
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
           "OnComponentEnabled": null,
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
           "OnComponentUpdate": null,
-          "Player": null
+          "Player": {
+            "_type": "component",
+            "component_id": "40bbd7f9-ae42-4a43-897d-910050f7fcb3",
+            "go": "148339c7-ee2b-4726-9842-c5d0eaf56598",
+            "component_type": "MediaPlayer"
+          },
+          "SeekStep": 10,
+          "ShowControlsWhilePaused": true,
+          "SizeFrom": null,
+          "UseAction": "use"
         }
       ],
       "Children": [
@@ -761,7 +780,6 @@
           "OnComponentStart": null,
           "OnComponentUpdate": null,
           "Permission": "Anyone",
-          "ResolverUrlOverride": "",
           "SoundOrigin": null,
           "Spatial": true,
           "Volume": 0.8
@@ -777,7 +795,8 @@
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
           "OnComponentUpdate": null,
-          "Player": null
+          "Player": null,
+          "Screen": null
         },
         {
           "__type": "Sandbox.BoxCollider",
@@ -890,7 +909,7 @@
                 "BloomLayer": false,
                 "AfterUILayer": false
               },
-              "RenderScale": 1,
+              "RenderScale": 0.5,
               "VerticalAlign": "Center"
             },
             {
@@ -898,6 +917,8 @@
               "__guid": "18a2635b-04d5-4958-8bff-32daa312b635",
               "__enabled": true,
               "Flags": 0,
+              "DesignSize": "560,280",
+              "FitToPanel": true,
               "OnComponentDestroy": null,
               "OnComponentDisabled": null,
               "OnComponentEnabled": null,

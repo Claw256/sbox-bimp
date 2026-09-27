@@ -27,7 +27,7 @@ UI, input and `VideoPlayer` behave.
 | `Code/Resolver/Media/` | WebM/MP4 parsing and writing, range downloads, the YouTube segmenter |
 | `Code/Resolver/Live/` | Live ingest: RTSP tunnel, HLS, MPEG-TS, AAC decoding, live segmenter |
 | `Assets/` | Prefabs and test scenes |
-| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md) (how it works) and [HITCHING.md](docs/HITCHING.md) (measurement log) |
+| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md): how it works |
 
 ## Rules of the road
 

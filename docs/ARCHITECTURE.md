@@ -1,8 +1,7 @@
 # How BIMP works
 
 The technical side of BIMP: how playback stays in sync, how links are resolved without any external service, how live
-streams are ingested, and the engine behaviour it works around. For using BIMP, see the [README](../README.md). For
-the measurements behind the smoothness work, see [HITCHING.md](HITCHING.md).
+streams are ingested, and the engine behaviour it works around. For using BIMP, see the [README](../README.md).
 
 - [Sync](#sync)
 - [Resolver](#resolver)
@@ -84,8 +83,8 @@ range-downloads a few seconds at a time (`RemoteFile`) and writes standalone Web
   first (`Fmp4Reader`, `Fmp4.ClustersFromMp4`). The Cues go at the end, where the engine looks for them. Nothing is
   re-encoded.
 - The audio blocks for the same time are woven in among the video blocks (`WebmMux.Interleave`), never ahead of a
-  cluster's keyframe. The engine reads a file in order and holds only a few seconds of packets ahead: audio written
-  after a whole keyframe interval of video arrived too late and went silent for 1–3 s at a time.
+  cluster's keyframe. The engine reads a file in order and holds only a few seconds of packets ahead, so audio placed
+  after a whole keyframe interval of video (5–7 s) would reach it too late and drop out.
 - The first segment is 8 s, so playback starts quickly; after that, segments are 40 s.
 - Each segment's audio runs 3 s past its end, and its video 1 s (`VideoOverlapSeconds`). A new player's first frame
   takes 150–520 ms at 1440p/4K, so the current one keeps showing real frames until the next is up.
@@ -157,7 +156,7 @@ Measured from the sender's output to the screen, using RTCP sender reports, with
 
 ### Smoothness
 
-90 s runs of `bimp_probe pace` in the editor, 1 s keyframe interval, unless noted. Details in [HITCHING.md](HITCHING.md).
+90 s runs of `bimp_probe pace` in the editor, 1 s keyframe interval, unless noted.
 
 | | Latency | Uploads/s | Gaps ≥ 50 ms | Frames > 30 ms | A/V | MFT drops |
 |---|---|---|---|---|---|---|

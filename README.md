@@ -237,7 +237,7 @@ Console variables. "Client, saved" ones are each player's own and are remembered
   engine plays smoothly at 4K60, and YouTube stops serving those URLs after ~88 MB. BIMP then switches to VP9 1440p60
   at a keyframe. Replaying the same video within 10 minutes goes straight to 1440p.
 - **Occasional small hitches** (a skipped frame or two) come from the engine, not BIMP: the same file played directly
-  through one engine `VideoPlayer` hitches as much. The measurements are in [docs/HITCHING.md](docs/HITCHING.md).
+  through one engine `VideoPlayer` hitches as much. A 720p source hitches least.
 - **Live H.264 can briefly break up** when a new segment's decoder starts. The log shows "H264: dropping pending sample
   (MFT deadlock)". This is inside Media Foundation. `bimp_live_latency normal`, a 1–2 s keyframe interval, or no
   B-frames at the source (OBS: `bframes=0`) all make it rarer. AV1 sources don't have it.
