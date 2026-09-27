@@ -1,0 +1,282 @@
+# BIMP — a media player for s&box
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![s&box library](https://img.shields.io/badge/s%26box-library-3fa9ff.svg)
+
+BIMP is a drop-in, networked media player library for [s&box](https://sbox.game). Put a screen or a speaker in your
+map, and everyone on the server can watch or listen to YouTube, Twitch, live cameras and plain media links together,
+in sync. Everything runs inside the game: there's no server to host, no proxy and no external service.
+
+- [Features](#features)
+- [What you can play](#what-you-can-play)
+- [Playing media (for players)](#playing-media-for-players)
+- [Adding BIMP to your game (for mappers and developers)](#adding-bimp-to-your-game-for-mappers-and-developers)
+- [Settings](#settings)
+- [Troubleshooting and limitations](#troubleshooting-and-limitations)
+- [How it works](#how-it-works)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Features
+
+- **Watch together.** The host keeps the timeline: play, pause, seek and skip reach everyone, and late joiners jump
+  straight to the right spot.
+- **YouTube, Twitch, Kick, Vimeo, SoundCloud and more**, resolved inside the scene. Videos, shorts, playlists, live
+  channels and VODs.
+- **Up to 4K60.** YouTube 4K60 plays as AV1 (the engine's smoothest decoder) for as long as YouTube serves it, then
+  carries on as VP9 1440p60.
+- **Your own quality and language.** Each player picks a resolution (144p–4K) and, for dubbed videos, an audio
+  language. Everyone stays on the same timeline.
+- **Live streams and cameras:** HLS, MPEG-TS, RTSP (over HTTP tunnelling) and Motion JPEG, with about a second of
+  latency for a well-configured source.
+- **A queue** with "requested by", and a **Recent** list of links you've played, to play or queue again.
+- **3D positional audio** with distance falloff, or flat audio.
+- **Speakers:** an audio-only mode for radios and jukeboxes, with a spectrum visualiser.
+- **In-world controls** you point at, plus a full on-screen **remote** opened with USE.
+- **Controller support:** every prompt shows your own button glyph (keyboard, Xbox, PlayStation, Nintendo...), and
+  the remote is fully usable with a gamepad.
+- **Permissions** per player: anyone, host only, or a whitelist, with "anyone can queue" on top.
+
+## What you can play
+
+| Link | How it plays |
+|---|---|
+| YouTube videos, shorts, `youtu.be`, YouTube Music, playlists (first video) | merged locally from YouTube's own files, VP9/AV1 + Opus |
+| YouTube live | live |
+| Twitch channels, VODs (`/videos/…`), clips | channels live, VODs seekable, clips as MP4 |
+| Kick channels and VODs | live, and seekable VODs |
+| Vimeo | MP4, or its HLS stream (seekable). DRM-protected videos are refused |
+| Streamable, X / Twitter posts | MP4 |
+| SoundCloud tracks | audio only |
+| archive.org items (`/details/…`) | the item's video or audio file |
+| Bandcamp tracks (album → first track) | the free MP3 stream (untested: Bandcamp refused the test machine) |
+| `.webm` `.mp4` `.mkv` `.mov` `.m4v` | played directly |
+| `.mp3` `.ogg` `.opus` `.flac` `.wav` `.m4a`, Icecast radio | played directly, audio only |
+| `.m3u8` (HLS) | a finished playlist plays as a seekable video, a growing one live |
+| `.ts` `.m2ts` `.mts` over HTTP | live MPEG-TS, or a finished file |
+| `rtsp://` `rtspt://` `rtsps://` | live, over RTSP-over-HTTP tunnelling (see [Live streams and cameras](#live-streams-and-cameras)) |
+| `.mjpg` `.mjpeg`, `/mjpg/…`, `?action=stream` | live Motion JPEG camera |
+
+**Not supported:**
+- DASH (`.mpd`), DRM and encrypted HLS.
+- H.265 anywhere: the engine has no decoder for it.
+- Dailymotion: its CDN refuses the HTTP client sandboxed code has to use.
+- Reddit: it only serves a bot check.
+- Mixcloud: its streams are obfuscated with a key that asks not to download them.
+- YouTube age-restricted, private and members-only videos, since there's no sign-in.
+
+## Playing media (for players)
+
+### On a screen
+
+- **Point at the screen** with your crosshair (or the mouse cursor) to show its controls: back/forward 10 s,
+  play/pause, next, stop, and a progress bar you can click to seek.
+  - The button you're aiming at lights up and shows your **USE** button (E on keyboard). Press it, or click, to use
+    that control. On the progress bar, USE seeks to the spot you're aiming at.
+  - The controls hide after 3 s. They stay up while you're aiming at a button, while paused, and for a few seconds
+    when something new starts. Look away and back to bring them back.
+- **Press USE anywhere else on the screen** (or while the controls are hidden) to open the **remote**. USE works from
+  as far away as you can point at the screen.
+
+### On a speaker
+
+Look at the speaker and press USE to open the remote. The display shows what's playing, with a live spectrum.
+
+### The remote
+
+The remote is the full set of controls:
+- **Now playing**, with the time, a seek bar and the transport buttons.
+- **Resolution and audio language** (for videos that have a choice). These are only for you: everyone else keeps
+  their own. Changing one reloads your picture at the same moment.
+- **A link box:** paste a link and press **Play now** (or Enter) or **Queue**.
+- **Up next**, the queue, with a remove button on each item and Clear (if you're allowed to control the player).
+- **Recent**, the links you've played on any player, newest first, with title, link and length. Press ▶ to play one
+  again or + to queue it. They're kept on your machine.
+- **Your volume** for all media players, and mute.
+
+Close it with USE again or Esc.
+
+### With a controller
+
+- The **D-pad** or **left stick** moves a blue highlight between the remote's controls: up/down by row, left/right
+  along the row.
+- **A** presses the highlighted control.
+- **B** closes the remote. USE and Start close it too.
+- On the **seek bar** or **volume slider**, left/right changes it by 10 s or 5%.
+- On a **drop down** (resolution, audio), A opens its menu. Up/down moves, A picks, and B closes just the menu.
+- A controller can't type or paste a link, so the link box shows a note instead. Use **Recent** to play something
+  again, or add links with a keyboard.
+- While the remote is open, your character doesn't move, jump or duck.
+
+## Adding BIMP to your game (for mappers and developers)
+
+### Install
+
+1. Add the library to your project: clone or download this repository into `YourGame/Libraries/bimp` (for example
+   `git clone https://github.com/Claw256/sbox-bimp.git Libraries/bimp`), then reopen the project in the editor.
+2. Drag a prefab into your scene:
+   - `prefabs/bimp_screen.prefab`: a TV or cinema screen.
+   - `prefabs/bimp_speaker.prefab`: an audio-only speaker.
+3. That's it. YouTube and the other sites work out of the box.
+
+The object with `MediaPlayer` must be networked; `MediaPlayer` switches its network mode to **Network Object**
+automatically. `scenes/mediaplayer_test.scene` has a screen, a speaker and a single-player controller for quick
+testing. For multiplayer testing, add a `NetworkHelper` with a player prefab.
+
+### Building your own screen or speaker
+
+The prefabs are just components:
+
+| Component | Where | What it does |
+|---|---|---|
+| `MediaPlayer` | root | Networked state, sync, queue, permissions, audio |
+| `WorldPanel` + `MediaScreen` | same object or a child | Draws the video and the controls. The panel is sized to the screen's model automatically (FitToObject), so resize the **model** or scale the whole object uniformly. The model's face should be centred on the MediaScreen object |
+| `WorldPanel` + `MediaSpeaker` | child | Title, time and spectrum display for audio-only players |
+| `Collider` + `MediaInteract` | root | Lets players press USE on it (works with the engine's `PlayerController`, or anything that uses `IPressable`) |
+
+### MediaPlayer properties
+
+| Property | Default | |
+|---|---|---|
+| Permission | Anyone | Who can play, pause, seek, skip and remove: `Anyone`, `HostOnly` or `Whitelist`. The host always can |
+| AllowedSteamIds | – | Used when Permission is Whitelist |
+| AnyoneCanQueue | true | Let everyone add to the queue, even if they can't control playback |
+| MaxQueue | 30 | |
+| Loop | false | Replay the current item when the queue is empty |
+| DefaultUrl | – | Played by the host when the scene starts |
+| AudioOnlyPlayer | false | Never fetch or show video (speakers) |
+| Volume | 0.8 | This player's volume, multiplied by each client's `bimp_volume` |
+| Spatial | true | 3D sound from the object's position. Off = the same volume everywhere |
+| AudioDistance | 2500 | Distance at which the sound fades out |
+| SoundOrigin | – | Play the sound from another object (e.g. a speaker next to the screen) |
+
+### MediaScreen properties
+
+| Property | Default | |
+|---|---|---|
+| FitToObject | true | Size the screen to its model: the WorldPanel's PanelSize and the BoxCollider, live in the editor |
+| SizeFrom | – | The model to fit to. Defaults to the first ModelRenderer on the object or its children |
+| Bezel | 2 | World units of border left around the picture on each side |
+| FitCollider | true | Also fit the BoxCollider (the USE target) to the model |
+| FitToPanel | true | Lay the UI out at DesignSize and scale it to the panel, so it looks the same at any size |
+| DesignSize | 1920×1080 | The panel size the UI is designed for (the speaker's display uses 560×280) |
+| HideControlsAfter | 3 | Seconds before the controls hide. 0 = never |
+| LookAwayTime | 0.3 | How long you must look away before looking back shows the controls again |
+| ShowControlsWhilePaused | true | Keep the controls up while paused |
+| AlwaysShowInfo | false | Keep the title, time and progress bar up all the time (the buttons still hide) |
+| LookRange | 0 | How far away looking counts. 0 = the WorldPanel's InteractionRange |
+| CheckLineOfSight | true | Looking through walls doesn't count |
+| AddWorldInput | true | Add a `WorldInput` to the camera if the scene has none, so the buttons are clickable |
+| UseAction | use | The input action that presses the aimed button, or opens the remote |
+| SeekStep | 10 | Seconds for the back and forward buttons |
+
+### Controllers in your game
+
+BIMP reads controller buttons through your game's own input actions: whatever you bind to A, B and the D-pad (in the
+default s&box bindings that's Jump, Duck and Slot1–3/Flashlight), plus the left stick. It works with any bindings;
+a button you leave unbound just does nothing in the remote. While the remote is open it takes the pad's input for the
+frame (`Input.Suppressed`) and turns off the engine's virtual cursor, and restores it afterwards.
+
+### Code API
+
+```csharp
+var player = Scene.GetAllComponents<Bimp.MediaPlayer>().First();
+
+// from anyone - permission checked on the host
+player.RequestPlay( "https://www.youtube.com/watch?v=aqz-KE-bpKQ" );
+player.RequestEnqueue( "https://example.com/song.mp3" );
+player.RequestSetPaused( true );
+player.RequestSeek( 90 );
+player.RequestSkip();
+
+// host only, no permission checks
+await player.PlayNowAsync( url, "Server" );
+player.PlayNext();
+player.Stop();
+
+// synced state
+player.HasMedia; player.Title; player.CurrentTime; player.MediaDuration; player.Paused; player.Queue;
+
+// is the remote open? (e.g. to hide your crosshair)
+Bimp.MediaRemote.IsOpen( Scene );
+```
+
+## Settings
+
+Console variables. "Client, saved" ones are each player's own and are remembered between sessions.
+
+| ConVar | Scope | |
+|---|---|---|
+| `bimp_volume` | client, saved | Your volume for all media players (0–1) |
+| `bimp_mute` | client, saved | Mute all media players locally |
+| `bimp_quality` | client, saved | Your preferred YouTube resolution, e.g. `1080`. `0` = auto (up to `bimp_max_height`). If a video doesn't have it, the next height down is used |
+| `bimp_audio_lang` | client, saved | Your preferred audio language for dubbed videos, e.g. `es`, `ja`. Empty = the original |
+| `bimp_ui_scale` | client, saved | Size of the remote (default `1.4`). It scales with the screen height; this multiplies that, never wider than 90% of the screen |
+| `bimp_av1` | client, saved | YouTube 4K60 as AV1 while YouTube serves it, then VP9 1440p60 (default `1`). `0` = VP9 4K60 throughout, which the engine plays at 19–45 fps |
+| `bimp_live_latency` | client, saved | Live latency: `low` (default, about one keyframe interval) or `normal` (a couple of segments behind, fewer decoder starts) |
+| `bimp_live_segment` | client, saved | `normal` latency only: minimum live segment length in seconds (default 4) |
+| `bimp_max_height` | server, replicated | The highest video height clients stream (default 720). Lower it for players on slow connections |
+| `bimp_yt_clients` | server, replicated | YouTube clients to try, in order (default `visionos,android_vr,ios`). Change it if YouTube stops serving one |
+| `bimp_debug` | client | Log what the screens think you're aiming at |
+
+## Troubleshooting and limitations
+
+- **`bimp_status`** in the console prints every player's state, stream and last error.
+- **A YouTube video won't play:** YouTube changes often. Try reordering `bimp_yt_clients`. `bimp_yt_formats <video id>`
+  shows what each client gets.
+- **YouTube 4K60 is 4K only for its first ~20–40 s.** Only YouTube's Android clients get AV1, the one format the
+  engine plays smoothly at 4K60, and YouTube stops serving those URLs after ~88 MB. BIMP then switches to VP9 1440p60
+  at a keyframe. Replaying the same video within 10 minutes goes straight to 1440p.
+- **Occasional small hitches** (a skipped frame or two) come from the engine, not BIMP: the same file played directly
+  through one engine `VideoPlayer` hitches as much. The measurements are in [docs/HITCHING.md](docs/HITCHING.md).
+- **Live H.264 can briefly break up** when a new segment's decoder starts. The log shows "H264: dropping pending sample
+  (MFT deadlock)". This is inside Media Foundation. `bimp_live_latency normal`, a 1–2 s keyframe interval, or no
+  B-frames at the source (OBS: `bframes=0`) all make it rarer. AV1 sources don't have it.
+- **Live streams and cameras:**
+  - For about 1 s of latency, set the camera or OBS to a **short keyframe interval** (1 s, or 0.5 s). Latency is
+    about one keyframe interval.
+  - RTSP needs a server or camera that supports **RTSP over HTTP tunnelling** (many IP cameras do on their web port;
+    VRCDN does, so `rtspt://stream.vrcdn.live/live/<name>` works). Sandboxed code has no raw sockets.
+  - Put credentials in the link (`rtsp://user:password@camera/path`). **The link, password included, is synced to
+    every player**, since each one connects itself.
+  - s&box blocks private network addresses and raw IPs, so a camera on `192.168.x.x` only works from a dedicated
+    server, a standalone game, or the editor started with `-allowlocalhttp`.
+- **Direct links** must be served like normal files, with `Content-Length` and range support. WebM files seek
+  reliably only with their seek index (Cues) at the end, as ffmpeg writes them.
+- **Copy and paste:** s&box doesn't let games read or write the clipboard, so there's no copy button. Ctrl+V works in
+  the remote's link box.
+- **Bandwidth:** every client streams the media itself, straight from the site; the host serves none.
+- The spectrum visualiser shows real data for audio-only players; for video the engine doesn't expose one, so it's
+  animated.
+
+### Live streams and cameras
+
+| Source | Mode | Behind the live edge (measured) |
+|---|---|---|
+| RTSP / MPEG-TS, H.264, keyframe every 1 s | `low` | ~1.0 s |
+| RTSP / MPEG-TS, H.264, keyframe every 0.5 s | `low` | ~0.5 s |
+| RTSP, AV1, keyframe every 1 s | `low` | ~1.3 s |
+| RTSP / HTTP Motion JPEG | frame by frame | ~0.07 s |
+| Any, `normal` mode | | 8–10 s |
+| HLS | | a few segments |
+
+## How it works
+
+- The **host** resolves each link's title and length and syncs a small play token plus the timeline (start time,
+  paused, queue).
+- **Every client resolves its own streams** from that token and plays them locally, working out where it should be
+  from the host clock. Stream URLs are tied to the client that asked for them, so nothing is proxied.
+- YouTube's separate video and audio files are merged locally into short WebM segments, played back to back in two
+  players that swap at each boundary. Live streams are cut into MP4 segments at keyframes the same way.
+- It's all C# within the s&box sandbox: no yt-dlp, no ffmpeg, no server.
+
+The details, with measurements, are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Contributing
+
+Bug reports, fixes and new site extractors are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the project
+layout, the code style, the sandbox rules and the in-editor test commands.
+
+## License
+
+[MIT](LICENSE) © 2026 Claw256
