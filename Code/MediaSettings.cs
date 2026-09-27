@@ -48,9 +48,9 @@ public static class MediaSettings
 
 	/// <summary>
 	/// 3D audio: media players sound from where they are and fade with distance. Off = every media player plays flat
-	/// (2D) for this player, at the same volume wherever they are.
+	/// (2D, no direction) for this player - still quieter the further away they are.
 	/// </summary>
-	[ConVar( "bimp_spatial", ConVarFlags.Saved, Help = "3D audio from media players (1, default), or flat 2D audio for you (0)" )]
+	[ConVar( "bimp_spatial", ConVarFlags.Saved, Help = "3D audio from media players (1, default), or flat 2D audio for you (0) - still fading with distance" )]
 	public static bool SpatialAudio { get; set; } = true;
 
 	/// <summary>

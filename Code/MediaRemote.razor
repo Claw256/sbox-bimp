@@ -185,7 +185,7 @@
 			<div class="footer">
 				<div class="btn small nav" onclick="@ToggleMute"><i>@(MediaSettings.Mute ? "volume_off" : "volume_up")</i></div>
 				<SliderControl class="volume nav" Min="@(0f)" Max="@(1f)" Step="@(0.01f)" ShowValueTooltip="@false" Value="@MediaSettings.Volume" OnValueChanged="@OnVolumeChanged"></SliderControl>
-				<div class="btn small nav audio-mode @(MediaSettings.SpatialAudio ? "" : "flat")" onclick="@ToggleSpatial" tooltip="@(MediaSettings.SpatialAudio ? "3D audio: sound comes from the screen. Click for 2D" : "2D audio: same volume everywhere. Click for 3D")"><i>@(MediaSettings.SpatialAudio ? "surround_sound" : "headphones")</i><span>@(MediaSettings.SpatialAudio ? "3D" : "2D")</span></div>
+				<div class="btn small nav audio-mode @(MediaSettings.SpatialAudio ? "" : "flat")" onclick="@ToggleSpatial" tooltip="@(MediaSettings.SpatialAudio ? "3D audio: sound comes from the screen. Click for 2D" : "2D audio: no direction, still quieter further away. Click for 3D")"><i>@(MediaSettings.SpatialAudio ? "surround_sound" : "headphones")</i><span>@(MediaSettings.SpatialAudio ? "3D" : "2D")</span></div>
 				@if ( PadMode )
 				{
 					<div class="hint">

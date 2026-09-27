@@ -99,7 +99,8 @@ The remote is the full set of controls:
 - **Recent**, the links you've played on any player, newest first, with title, link and length. Press ▶ to play one
   again or + to queue it. They're kept on your machine.
 - **Your volume** for all media players, mute, and a **3D / 2D** button: 3D audio comes from the screen and fades with
-  distance, 2D plays at the same volume wherever you are. These are yours only, and apply to every media player.
+  distance; 2D has no direction (it's centred, like headphones), but still gets quieter the further away you are.
+  These are yours only, and apply to every media player.
 
 Close it with USE again or Esc.
 
@@ -220,7 +221,7 @@ Console variables. "Client, saved" ones are each player's own and are remembered
 |---|---|---|
 | `bimp_volume` | client, saved | Your volume for all media players (0–1) |
 | `bimp_mute` | client, saved | Mute all media players locally |
-| `bimp_spatial` | client, saved | `1` (default) = 3D audio from media players, `0` = flat 2D audio for you, at the same volume anywhere |
+| `bimp_spatial` | client, saved | `1` (default) = 3D audio from media players, `0` = flat 2D audio for you: no direction, but still fading with distance |
 | `bimp_quality` | client, saved | Your preferred YouTube resolution, e.g. `1080`. `0` = auto (up to `bimp_max_height`). If a video doesn't have it, the next height down is used |
 | `bimp_audio_lang` | client, saved | Your preferred audio language for dubbed videos, e.g. `es`, `ja`. Empty = the original |
 | `bimp_ui_scale` | client, saved | Size of the remote (default `1.4`). It scales with the screen height; this multiplies that, never wider than 90% of the screen |

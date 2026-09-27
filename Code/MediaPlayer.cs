@@ -79,6 +79,20 @@ public sealed class MediaPlayer : Component
 	public bool EffectiveSpatial => Spatial && MediaSettings.SpatialAudio;
 
 	/// <summary>
+	/// 2D for this player (bimp_spatial off, on a player that's otherwise 3D): the sound has no direction, but still
+	/// fades with the listener's distance from it, on the same curve as 3D. A player that isn't <see cref="Spatial"/>
+	/// at all is the same volume everywhere.
+	/// </summary>
+	bool FlatWithDistance => Spatial && !MediaSettings.SpatialAudio;
+
+	/// <summary> How loud this player is at a point, from <see cref="AudioFalloff"/> over <see cref="AudioDistance"/>. </summary>
+	float DistanceFade( Vector3 listener )
+	{
+		if ( AudioDistance <= 0 ) return 1;
+		return AudioFalloff.Evaluate( (listener.Distance( SoundPosition ) / AudioDistance).Clamp( 0, 1 ) );
+	}
+
+	/// <summary>
 	/// Where the sound comes from. Defaults to this GameObject.
 	/// </summary>
 	[Property, Group( "Audio" )] public GameObject SoundOrigin { get; set; }
@@ -658,7 +672,9 @@ public sealed class MediaPlayer : Component
 
 		Backend.SyncedTime = Paused || IsLive ? null : CurrentTime;
 		Backend.Present();
-		Backend.SetAudio( SoundPosition, EffectiveSpatial, Volume * MediaSettings.EffectiveVolume, AudioDistance );
+		var volume = Volume * MediaSettings.EffectiveVolume;
+		if ( FlatWithDistance ) volume *= DistanceFade( Sound.Listener.Position );
+		Backend.SetAudio( SoundPosition, EffectiveSpatial, volume, AudioDistance );
 
 		if ( Backend.Error is not null )
 		{
