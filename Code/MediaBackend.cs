@@ -504,6 +504,7 @@ public sealed class MediaBackend : IDisposable
 			a.Position = pos;
 			a.Volume = volume;
 			a.Distance = distance;
+			a.Falloff = MediaPlayer.AudioFalloff;
 		}
 
 		if ( music is not null )
@@ -512,6 +513,7 @@ public sealed class MediaBackend : IDisposable
 			music.Position = pos;
 			music.Volume = volume;
 			music.Distance = distance;
+			music.Falloff = MediaPlayer.AudioFalloff;
 		}
 	}
 

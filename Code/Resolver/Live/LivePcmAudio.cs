@@ -154,6 +154,7 @@ public sealed class LivePcmAudio : IDisposable
 		handle.Position = spatial ? position : Vector3.Forward * 64.0f;
 		handle.Volume = volume;
 		handle.Distance = distance;
+		handle.Falloff = MediaPlayer.AudioFalloff;
 	}
 
 	public void Dispose()

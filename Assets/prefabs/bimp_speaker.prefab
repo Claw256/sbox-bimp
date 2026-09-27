@@ -22,9 +22,9 @@
         "Loop": false,
         "DefaultUrl": "",
         "AudioOnlyPlayer": true,
-        "Volume": 0.8,
+        "Volume": 1,
         "Spatial": true,
-        "AudioDistance": 2000,
+        "AudioDistance": 4000,
         "SoundOrigin": null,
         "ResolverUrlOverride": ""
       },

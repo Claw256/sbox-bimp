@@ -484,6 +484,22 @@ $accent: #3fa9ff;
 			width: 220px;
 		}
 
+		// 3D / 2D audio toggle: an icon and a label, so it reads as a mode rather than a mystery button
+		.audio-mode
+		{
+			width: auto;
+			padding: 0 12px;
+			gap: 6px;
+			border-radius: 18px;
+			font-size: 13px;
+			font-weight: 600;
+
+			&.flat
+			{
+				background-color: rgba( 63, 169, 255, 0.35 );
+			}
+		}
+
 		.hint
 		{
 			margin-left: auto;

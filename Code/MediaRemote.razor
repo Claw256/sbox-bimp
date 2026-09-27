@@ -185,6 +185,7 @@
 			<div class="footer">
 				<div class="btn small nav" onclick="@ToggleMute"><i>@(MediaSettings.Mute ? "volume_off" : "volume_up")</i></div>
 				<SliderControl class="volume nav" Min="@(0f)" Max="@(1f)" Step="@(0.01f)" ShowValueTooltip="@false" Value="@MediaSettings.Volume" OnValueChanged="@OnVolumeChanged"></SliderControl>
+				<div class="btn small nav audio-mode @(MediaSettings.SpatialAudio ? "" : "flat")" onclick="@ToggleSpatial" tooltip="@(MediaSettings.SpatialAudio ? "3D audio: sound comes from the screen. Click for 2D" : "2D audio: same volume everywhere. Click for 3D")"><i>@(MediaSettings.SpatialAudio ? "surround_sound" : "headphones")</i><span>@(MediaSettings.SpatialAudio ? "3D" : "2D")</span></div>
 				@if ( PadMode )
 				{
 					<div class="hint">
@@ -198,7 +199,7 @@
 				}
 				else
 				{
-					<div class="hint"><span>Your volume (all players) ·</span><InputGlyph Action="use" Size="@InputGlyphSize.Small"></InputGlyph><span>or</span><InputGlyph Key="escape" Size="@InputGlyphSize.Small"></InputGlyph><span>to close</span></div>
+					<div class="hint"><span>Your audio (all players) ·</span><InputGlyph Action="use" Size="@InputGlyphSize.Small"></InputGlyph><span>or</span><InputGlyph Key="escape" Size="@InputGlyphSize.Small"></InputGlyph><span>to close</span></div>
 				}
 			</div>
 
@@ -536,6 +537,12 @@
 		MediaSettings.Mute = !MediaSettings.Mute;
 	}
 
+	/// <summary> 3D audio from every media player, or flat 2D for this player (bimp_spatial). </summary>
+	void ToggleSpatial()
+	{
+		MediaSettings.SpatialAudio = !MediaSettings.SpatialAudio;
+	}
+
 	string TakeUrl()
 	{
 		var text = UrlEntry?.Text?.Trim();
@@ -571,7 +578,7 @@
 
 		return HashCode.Combine(
 			HashCode.Combine( Target.PlayId, Target.Title, Target.Paused, Target.Status, Target.LocalNotice, (int)Target.CurrentTime, Target.MediaDuration ),
-			HashCode.Combine( QueueHash(), MediaSettings.Mute, MediaSettings.Volume, Target.CanLocalControl, pendingSeek, PadMode ),
+			HashCode.Combine( QueueHash(), MediaSettings.Mute, MediaSettings.Volume, MediaSettings.SpatialAudio, Target.CanLocalControl, pendingSeek, PadMode ),
 			HashCode.Combine( Target.Qualities, Target.AudioTracks, MediaSettings.Quality, MediaSettings.AudioLanguage, PlayingAsText, ShowRecent, RecentLinks.Version )
 		);
 	}

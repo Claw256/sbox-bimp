@@ -55,7 +55,7 @@ public sealed class MediaPlayer : Component
 	/// </summary>
 	[Property, Group( "Playback" )] public bool AudioOnlyPlayer { get; set; }
 
-	[Property, Group( "Playback" ), Range( 0, 1 )] public float Volume { get; set; } = 0.8f;
+	[Property, Group( "Playback" ), Range( 0, 1 )] public float Volume { get; set; } = 1.0f;
 
 	/// <summary>
 	/// Sound comes from this object's position in the world and falls off with distance.
@@ -64,9 +64,19 @@ public sealed class MediaPlayer : Component
 	[Property, Group( "Audio" )] public bool Spatial { get; set; } = true;
 
 	/// <summary>
-	/// Distance at which the sound is fully faded out.
+	/// Distance at which the sound is fully faded out (see <see cref="AudioFalloff"/>).
 	/// </summary>
-	[Property, Group( "Audio" ), ShowIf( nameof( Spatial ), true )] public float AudioDistance { get; set; } = 2500.0f;
+	[Property, Group( "Audio" ), ShowIf( nameof( Spatial ), true )] public float AudioDistance { get; set; } = 4000.0f;
+
+	/// <summary>
+	/// How the sound fades out to <see cref="AudioDistance"/>: nearly full volume in the room with the screen, then a
+	/// smooth fade. The engine's own curve is made for its 15000 unit default range; over a screen's few thousand units
+	/// it was down to 22% three metres away and 4% at twelve.
+	/// </summary>
+	public static readonly Curve AudioFalloff = new( new( 0, 1 ), new( 0.15f, 0.92f ), new( 0.45f, 0.55f ), new( 0.75f, 0.2f ), new( 1, 0 ) );
+
+	/// <summary> 3D for this player: the player's own setting, unless they've turned 3D audio off (bimp_spatial). </summary>
+	public bool EffectiveSpatial => Spatial && MediaSettings.SpatialAudio;
 
 	/// <summary>
 	/// Where the sound comes from. Defaults to this GameObject.
@@ -648,7 +658,7 @@ public sealed class MediaPlayer : Component
 
 		Backend.SyncedTime = Paused || IsLive ? null : CurrentTime;
 		Backend.Present();
-		Backend.SetAudio( SoundPosition, Spatial, Volume * MediaSettings.EffectiveVolume, AudioDistance );
+		Backend.SetAudio( SoundPosition, EffectiveSpatial, Volume * MediaSettings.EffectiveVolume, AudioDistance );
 
 		if ( Backend.Error is not null )
 		{

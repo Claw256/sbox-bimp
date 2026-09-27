@@ -411,6 +411,7 @@ public sealed class SegmentPlayer : IDisposable
 		a.Position = audioSpatial ? audioPosition : Vector3.Forward * 64.0f;
 		a.Volume = slot.Preload || slot.Fading ? 0 : audioVolume;
 		a.Distance = audioDistance;
+		a.Falloff = MediaPlayer.AudioFalloff;
 	}
 
 	public void Dispose()
