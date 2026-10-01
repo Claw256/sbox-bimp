@@ -22,7 +22,10 @@ public sealed class HlsReader
 	readonly double startTime;
 	readonly double maxLag;
 
-	public HlsReader( Uri url, LiveSegmenter sink, int maxHeight, Func<CancellationToken, Task> waitForPlayback, double startTime = 0, double maxLag = double.MaxValue )
+	/// <summary> Where playlist text comes from: the url itself, unless something (a DASH manifest turned into playlists) answers for it. </summary>
+	readonly Func<Uri, CancellationToken, Task<string>> fetchText;
+
+	public HlsReader( Uri url, LiveSegmenter sink, int maxHeight, Func<CancellationToken, Task> waitForPlayback, double startTime = 0, double maxLag = double.MaxValue, Func<Uri, CancellationToken, Task<string>> fetchText = null )
 	{
 		this.url = url;
 		this.sink = sink;
@@ -30,6 +33,7 @@ public sealed class HlsReader
 		this.waitForPlayback = waitForPlayback;
 		this.startTime = startTime;
 		this.maxLag = maxLag;
+		this.fetchText = fetchText ?? ( ( uri, ct ) => Http.RequestStringAsync( uri.ToString(), cancellationToken: ct ) );
 	}
 
 	/// <summary>
@@ -39,7 +43,7 @@ public sealed class HlsReader
 	{
 		var reader = new HlsReader( url, null, 4320, null );
 		var (media, _) = await reader.ResolveVariant( url, ct );
-		var list = Parse( media, await Http.RequestStringAsync( media.ToString(), cancellationToken: ct ) );
+		var list = Parse( media, await reader.fetchText( media, ct ) );
 		var duration = list.Segments.Count > 0 ? list.Segments[^1].Start + list.Segments[^1].Duration : 0;
 		return (!list.Ended, duration, reader.PickedHeight);
 	}
@@ -106,8 +110,8 @@ public sealed class HlsReader
 		{
 			try
 			{
-				video.List = Parse( video.Playlist, await Http.RequestStringAsync( video.Playlist.ToString(), cancellationToken: ct ) );
-				if ( audio is not null ) audio.List = Parse( audio.Playlist, await Http.RequestStringAsync( audio.Playlist.ToString(), cancellationToken: ct ) );
+				video.List = Parse( video.Playlist, await fetchText( video.Playlist, ct ) );
+				if ( audio is not null ) audio.List = Parse( audio.Playlist, await fetchText( audio.Playlist, ct ) );
 				failures = 0;
 			}
 			catch ( Exception e ) when ( e is not OperationCanceledException && e is not ResolveException )
@@ -126,8 +130,9 @@ public sealed class HlsReader
 			var list = video.List;
 			if ( list.Ended ) Duration = list.Segments.Count > 0 ? list.Segments[^1].Start + list.Segments[^1].Duration : 0;
 
-			// segments arrive whole, a target duration apart: buffer two of them past the overlap before playing
-			sink.StartBufferSeconds = sink.Overlap + 2 * list.TargetDuration + 1.0;
+			// segments arrive whole, a target duration apart: buffer two of them past the overlap before playing - or, in
+			// low latency mode, about one (YouTube's live HLS has no LL-HLS parts, so its 5 s segments set the floor)
+			sink.StartBufferSeconds = LowLatencyLive( list ) ? sink.Overlap + Math.Min( list.TargetDuration, 3 ) + 1.0 : sink.Overlap + 2 * list.TargetDuration + 1.0;
 
 			if ( video.Next < 0 ) video.Next = FirstSegment( list );
 			if ( video.Next < list.FirstSequence ) video.Next = list.FirstSequence; // fell out of the window
@@ -180,6 +185,9 @@ public sealed class HlsReader
 
 	static long End( Follower f ) => f.List.FirstSequence + f.List.Segments.Count;
 
+	/// <summary> A live playlist played in low latency mode (bimp_live_latency, anything but "normal"). </summary>
+	static bool LowLatencyLive( MediaPlaylist list ) => !list.Ended && MediaSettings.LowLatencyLive;
+
 	/// <summary>
 	/// Live: far enough from the end to fill the start buffer right away (plus the segment being cut). VOD: the segment
 	/// containing the start time - or the next one if that starts more than maxLag before it.
@@ -189,7 +197,10 @@ public sealed class HlsReader
 		if ( !list.Ended )
 		{
 			var last = list.FirstSequence + list.Segments.Count - 1;
-			var joinFromEnd = (int)Math.Ceiling( sink.StartBufferSeconds / Math.Max( 1, list.TargetDuration ) ) + 1;
+			// low latency: start about 6 s (at least two segments) behind the newest - the playlist has them all, so the
+			// playback buffer starts full and stays about that deep as new segments arrive at the pace they play
+			var joinFromEnd = LowLatencyLive( list ) ? Math.Max( 2, (int)Math.Ceiling( 6 / Math.Max( 1, list.TargetDuration ) ) )
+				: (int)Math.Ceiling( sink.StartBufferSeconds / Math.Max( 1, list.TargetDuration ) ) + 1;
 			return Math.Max( list.FirstSequence, last - joinFromEnd + 1 );
 		}
 
@@ -347,7 +358,7 @@ public sealed class HlsReader
 	/// </summary>
 	async Task<(Uri video, Uri audio)> ResolveVariant( Uri playlist, CancellationToken ct )
 	{
-		var text = await Http.RequestStringAsync( playlist.ToString(), cancellationToken: ct );
+		var text = await fetchText( playlist, ct );
 		if ( !text.TrimStart().StartsWith( "#EXTM3U" ) ) throw new ResolveException( "That isn't an HLS playlist." );
 		if ( !text.Contains( "#EXT-X-STREAM-INF" ) ) return (playlist, null);
 
@@ -381,6 +392,12 @@ public sealed class HlsReader
 		static bool Av1( string c ) => c.Contains( "av01" );
 		var playable = variants.Where( v => !Hevc( v.codecs ) ).ToList();
 		if ( playable.Count == 0 ) throw new ResolveException( "This stream is only offered as H.265 (HEVC), which the engine can't decode." );
+
+		// HE-AAC only plays through a declared-rate trick (see AacConfig.OutputRate): a variant with plain AAC-LC wins,
+		// even a taller one (YouTube's 144p and some 240p variants are HE-AAC, the rest LC)
+		static bool HeAac( string c ) => c.Contains( "mp4a.40.5" ) || c.Contains( "mp4a.40.29" );
+		var lc = playable.Where( v => !HeAac( v.codecs ) ).ToList();
+		if ( lc.Count > 0 ) playable = lc;
 
 		var fits = playable.Where( v => v.height == 0 || v.height <= maxHeight ).ToList();
 		var pick = (fits.Count > 0 ? fits : playable.OrderBy( v => v.height ).Take( 1 ).ToList())

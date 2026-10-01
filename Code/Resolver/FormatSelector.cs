@@ -116,6 +116,15 @@ public static class FormatSelector
 		return tracks.Values.OrderBy( t => !t.IsDefault ).ThenBy( t => t.Name.ToLowerInvariant() ).ToList();
 	}
 
+	/// <summary> Do these formats have an audio track in this language, matched the way <see cref="PickAudio"/> matches it? </summary>
+	public static bool HasLanguage( IEnumerable<MediaFormat> formats, string lang )
+	{
+		if ( string.IsNullOrWhiteSpace( lang ) ) return true;
+		var primary = lang.Split( '-' )[0];
+		return WebmAudio( formats ).Any( f => string.Equals( f.Language, lang, StringComparison.OrdinalIgnoreCase )
+			|| string.Equals( (f.Language ?? "").Split( '-' )[0], primary, StringComparison.OrdinalIgnoreCase ) );
+	}
+
 	/// <summary> Audio formats for the requested language ("es" finds "es-419"), falling back to the original track. </summary>
 	static List<MediaFormat> PickAudio( List<MediaFormat> audio, string lang )
 	{

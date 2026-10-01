@@ -25,12 +25,23 @@ public sealed class MediaQueueItem
 
 	public bool IsLive { get; set; }
 
+	/// <summary>
+	/// Where playback starts (seconds), from the link's start time (YouTube's <c>t=</c>). 0 = the beginning.
+	/// </summary>
+	public float StartAt { get; set; }
+
 	public bool AudioOnly { get; set; }
 
 	/// <summary>
 	/// The stream can't byte-seek, seeking is done by re-requesting it with a start offset (resolver streams).
 	/// </summary>
 	public bool SeekByReload { get; set; }
+
+	/// <summary>
+	/// A playlist entry that was queued from a listing alone (title, length): it's resolved properly - qualities, dubs,
+	/// live or not - when its turn comes.
+	/// </summary>
+	public bool Lazy { get; set; }
 
 	/// <summary>
 	/// Display name of whoever requested this.
@@ -46,4 +57,9 @@ public sealed class MediaQueueItem
 	/// Audio tracks the resolver can serve (JSON list of <see cref="MediaAudioTrack"/>). Empty = no choice.
 	/// </summary>
 	public string AudioTracks { get; set; }
+
+	/// <summary>
+	/// Caption tracks the media has (JSON list of <see cref="MediaCaptionTrack"/>). Empty = none.
+	/// </summary>
+	public string CaptionTracks { get; set; }
 }

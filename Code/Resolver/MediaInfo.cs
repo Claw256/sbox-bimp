@@ -41,6 +41,12 @@ public sealed class MediaInfo
 
 	/// <summary> Audio tracks (dubs) clients can pick. Empty when there's no choice. </summary>
 	public List<MediaAudioTrack> AudioTracks { get; set; } = new();
+
+	/// <summary> Where to start playing (seconds), from the link (YouTube's <c>t=</c>). 0 = the beginning. </summary>
+	public float StartAt { get; set; }
+
+	/// <summary> Caption tracks clients can show. Empty when there are none. </summary>
+	public List<MediaCaptionTrack> CaptionTracks { get; set; } = new();
 }
 
 /// <summary>
@@ -132,4 +138,24 @@ public interface IExtractor
 
 	/// <summary> Client: the files to play. Throws <see cref="ResolveException"/>. </summary>
 	Task<StreamPlan> GetStreamsAsync( string id, StreamRequest request, CancellationToken ct );
+}
+
+/// <summary> An extractor whose media can have captions: <see cref="MediaInfo.CaptionTracks"/> lists them, this fetches one. </summary>
+public interface ICaptionExtractor
+{
+	/// <summary>
+	/// Client: the raw caption file of one track (<see cref="MediaCaptionTrack.Id"/>), for <see cref="Captions.Parse"/>.
+	/// Fetched per client because the urls can be tied to the requesting IP. Null when it can't be had.
+	/// </summary>
+	Task<string> GetCaptionsAsync( string id, string trackId, CancellationToken ct );
+}
+
+/// <summary> One video of a playlist. </summary>
+public sealed record PlaylistEntry( string Url, string Title, float Duration );
+
+/// <summary> An extractor that can list the videos of a playlist link. </summary>
+public interface IPlaylistExtractor
+{
+	/// <summary> The entries (at most <paramref name="max"/>) if this url is a playlist without a single video picked, else null. </summary>
+	Task<List<PlaylistEntry>> GetPlaylistAsync( Uri url, int max, CancellationToken ct );
 }

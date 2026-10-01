@@ -270,7 +270,7 @@ public static class MediaProbe
 	[ConCmd( "bimp_probe_file", Help = "[probe] Play a FileSystem.Data video directly (looped), no argument stops it; 'native' = the engine's own texture, no frame sink; 'once' = no loop" )]
 	public static void FileCmd( string path = null, string mode = null )
 	{
-		fileNative = mode == "native";
+		fileNative = mode?.Contains( "native" ) ?? false;
 		fileVideo?.Dispose();
 		fileSink?.Dispose();
 		fileVideo = null;
@@ -280,15 +280,50 @@ public static class MediaProbe
 		fileSink = new VideoFrameSink();
 		fileVideo = new VideoPlayer();
 		if ( !fileNative ) fileSink.Attach( fileVideo, null, null, "file" );
-		fileVideo.Repeat = mode != "once";
+		fileVideo.Repeat = !(mode?.Contains( "once" ) ?? false);
 		fileVideo.Play( FileSystem.Data, path );
 		fileScene = Game.ActiveScene;
-		Log.Info( $"[bimp probe] playing {path} directly" );
+		fileAudioReported = false;
+		fileStarted = 0;
+
+		// "prime:N": hold the player paused for N seconds after it starts (its clock frozen, its decoder free to run
+		// ahead), then let it go
+		filePrimeSeconds = 0;
+		filePrimed = false;
+		var prime = System.Text.RegularExpressions.Regex.Match( mode ?? "", "prime:([0-9.]+)" );
+		if ( prime.Success ) filePrimeSeconds = float.Parse( prime.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture );
+		Log.Info( $"[bimp probe] playing {path} directly{(filePrimeSeconds > 0 ? $", primed {filePrimeSeconds}s" : "")}" );
 	}
+
+	static float filePrimeSeconds;
+	static bool filePrimed;
+
+	/// <summary>
+	/// [probe] Load a FileSystem.Data video as an engine video texture (the engine's own player, which its
+	/// <c>overlay_video 1</c> debug overlay can see: decode ms per frame, decoded fps, packet and frame queue depths)
+	/// and draw it in the corner every frame - an undrawn video texture is paused. No argument stops it.
+	/// </summary>
+	[ConCmd( "bimp_probe_texture", Help = "[probe] Play a FileSystem.Data video as an engine video texture drawn in the corner (for overlay_video 1); no argument stops it" )]
+	public static void TextureCmd( string path = null )
+	{
+		probeTexture = string.IsNullOrWhiteSpace( path ) ? null : Texture.Load( FileSystem.Data, path );
+		probeTextureScene = Game.ActiveScene;
+		Log.Info( $"[bimp probe] video texture {(probeTexture is null ? "stopped" : $"{path}: {probeTexture.Width}x{probeTexture.Height}")}" );
+	}
+
+	static Texture probeTexture;
+	static Scene probeTextureScene;
 
 	/// <summary> Called every frame by the media players: keeps the <c>bimp_probe_file</c> video running (once a frame). </summary>
 	internal static void PresentFile()
 	{
+		if ( probeTexture is not null && lastTexturePresent != Application.FrameCount )
+		{
+			lastTexturePresent = Application.FrameCount;
+			if ( Game.ActiveScene != probeTextureScene ) probeTexture = null;
+			else Game.ActiveScene?.DebugOverlay.Texture( probeTexture, new Rect( 20, 400, 640, 360 ) );
+		}
+
 		if ( fileVideo is null || lastFilePresent == Application.FrameCount ) return;
 		lastFilePresent = Application.FrameCount;
 
@@ -299,10 +334,33 @@ public static class MediaProbe
 			return;
 		}
 
+		if ( filePrimeSeconds > 0 && !filePrimed )
+		{
+			if ( !fileVideo.IsPaused && fileStarted < filePrimeSeconds ) fileVideo.Pause();
+			else if ( fileStarted >= filePrimeSeconds )
+			{
+				filePrimed = true;
+				fileVideo.Resume();
+				Note( $"file resumed after {filePrimeSeconds}s primed, at {fileVideo.PlaybackTime:0.000}" );
+				Log.Info( $"[bimp probe] file resumed after priming {filePrimeSeconds}s, at {fileVideo.PlaybackTime:0.000}s" );
+			}
+		}
+
 		var t = System.Diagnostics.Stopwatch.GetTimestamp();
 		fileVideo.Present();
 		PresentTook( System.Diagnostics.Stopwatch.GetElapsedTime( t ).TotalMilliseconds, "file", 0 );
+
+		// what the engine made of the file's audio, once: its decoder either opened it by now or never will
+		if ( !fileAudioReported && fileStarted > 3 )
+		{
+			fileAudioReported = true;
+			Log.Info( $"[bimp probe] file audio: {(fileVideo.SampleRate > 0 ? $"{fileVideo.SampleRate}Hz {fileVideo.Channels}ch" : "none")}, video {fileVideo.Width}x{fileVideo.Height}, at {fileVideo.PlaybackTime:0.0}s" );
+		}
 	}
+
+	static ulong lastTexturePresent;
+	static bool fileAudioReported;
+	static RealTimeSince fileStarted;
 
 	/// <summary>
 	/// [probe] Make garbage like the live pipeline does, with nothing playing: ~1.5 MB/s of 10-200 KB arrays kept ~10 s
@@ -383,6 +441,38 @@ public static class MediaProbe
 	}
 
 	/// <summary>
+	/// Skip to the next queued item on the first media player in the scene (host), for testing from the console.
+	/// </summary>
+	[ConCmd( "bimp_skip", Help = "[probe] Play the next queued item on the first media player in the scene" )]
+	public static void SkipCmd() => Game.ActiveScene?.GetAllComponents<MediaPlayer>().FirstOrDefault()?.PlayNext();
+
+	/// <summary>
+	/// Resolve a url the way the host does and log the queue item (or the error), without needing a scene.
+	/// </summary>
+	[ConCmd( "bimp_resolve", Help = "[probe] Resolve a url like the host does and log the result or error (no scene needed)" )]
+	public static void ResolveCmd( string url, int audio = 0 ) => _ = ResolveLog( url, audio != 0 );
+
+	static async Task ResolveLog( string url, bool audioOnly )
+	{
+		try
+		{
+			var playlist = await Bimp.Resolver.BimpResolver.Instance.ResolvePlaylistAsync( url, audioOnly, 200 );
+			if ( playlist is not null )
+			{
+				Log.Info( $"[bimp] playlist of {playlist.Count}: {string.Join( " | ", playlist.Take( 5 ).Select( p => $"{p.Title} ({p.Duration:0}s)" ) )}{(playlist.Count > 5 ? " ..." : "")}" );
+				url = playlist[0].Url;
+			}
+
+			var item = await Bimp.Resolver.BimpResolver.Instance.ResolveAsync( url, audioOnly );
+			Log.Info( $"[bimp] resolved: title={item.Title} duration={item.Duration:0} start={item.StartAt:0} live={item.IsLive} audioOnly={item.AudioOnly} seekByReload={item.SeekByReload} play={item.PlayUrl} qualities={item.Qualities ?? "-"} audioTracks={MediaStreamOptions.ParseAudioTracks( item.AudioTracks ).Count} captions={Captions.ParseTracks( item.CaptionTracks ).Count}" );
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( e is Bimp.Resolver.ResolveException ? $"[bimp] resolve failed: {e.Message}" : $"[bimp] resolve failed: {e}" );
+		}
+	}
+
+	/// <summary>
 	/// Print what every media player in the scene is doing, for diagnosing from the console.
 	/// </summary>
 	[ConCmd( "bimp_status", Help = "Print the state of every media player in the scene" )]
@@ -393,7 +483,7 @@ public static class MediaProbe
 			var b = p.Backend;
 			var backend = b is null ? "no backend"
 				: $"preparing={b.IsPreparing} loaded={b.Loaded} time={b.Time:0.00} {b.Width}x{b.Height} tex={(b.Texture is { } t ? $"{t.Width}x{t.Height} loaded={t.IsLoaded} valid={t.IsValid()}" : "null")} hasVideo={b.HasVideo} audio={b.AudioFormat}{(b.LiveDescription is { } ld ? $" live=[{ld}]" : "")} paused={b.IsPaused} finished={b.Finished} error={b.Error ?? "-"}";
-			Log.Info( $"[bimp] {p.GameObject.Name}: status={p.Status ?? "-"} title={p.Title ?? "-"} play={p.PlayUrl ?? "-"} local={p.LocalStreamUrl ?? "-"} t={p.CurrentTime:0.00}/{p.MediaDuration:0.00} seekByReload={p.SeekByReload} | {backend} | notice={p.LocalNotice ?? "-"}" );
+			Log.Info( $"[bimp] {p.GameObject.Name}: status={p.Status ?? "-"} title={p.Title ?? "-"} play={p.PlayUrl ?? "-"} local={p.LocalStreamUrl ?? "-"} t={p.CurrentTime:0.00}/{p.MediaDuration:0.00} seekByReload={p.SeekByReload} | {backend} | notice={p.LocalNotice ?? "-"} | queue={p.Queue.Count}{(p.Queue.Count > 0 ? $" next={p.Queue[0].Title} (lazy={p.Queue[0].Lazy})" : "")}" );
 		}
 	}
 
@@ -600,13 +690,15 @@ public static class MediaProbe
 
 	/// <summary> [probe] GET a url the way the sandbox does, and print the status, headers and the start of the body. </summary>
 	[ConCmd( "bimp_fetch", Help = "[probe] GET a url through Sandbox.Http and print what came back; 'follow' then GETs the first m3u8 url in it" )]
-	public static void FetchCmd( string url, string follow = null ) => _ = Fetch( url, follow == "follow" );
+	public static void FetchCmd( string url, string follow = null, string headers = null ) => _ = Fetch( url, follow == "follow", headers );
 
-	static async Task Fetch( string url, bool follow = false )
+	static async Task Fetch( string url, bool follow = false, string headers = null )
 	{
 		try
 		{
-			using var r = await Http.RequestAsync( url );
+			// headers: "Name=value;Name2=value2"
+			var extra = headers?.Split( ';', StringSplitOptions.RemoveEmptyEntries ).Select( h => h.Split( '=', 2 ) ).Where( p => p.Length == 2 ).ToDictionary( p => p[0].Trim(), p => p[1].Trim() );
+			using var r = await Http.RequestAsync( url, headers: extra );
 			var body = await r.Content.ReadAsStringAsync();
 			var next = System.Text.RegularExpressions.Regex.Match( body.Replace( @"\/", "/" ), @"https?://[^""\s]+\.m3u8[^""\s]*" );
 			if ( follow && next.Success ) _ = Fetch( next.Value );

@@ -123,6 +123,36 @@ $panel: rgba( 10, 12, 16, 0.85 );
 		gap: 12px;
 	}
 
+	// captions: centred near the bottom, above the controls while they're showing
+	.subs
+	{
+		position: absolute;
+		left: 10%;
+		right: 10%;
+		bottom: 90px;
+		flex-direction: column;
+		align-items: center;
+		pointer-events: none;
+		transition: bottom 0.2s ease;
+
+		.subs-line
+		{
+			margin-top: 4px;
+			padding: 4px 16px;
+			border-radius: 6px;
+			background-color: rgba( 0, 0, 0, 0.72 );
+			font-size: 44px;
+			line-height: 1.2;
+			text-align: center;
+			color: white;
+		}
+	}
+
+	&.controls-visible .subs
+	{
+		bottom: 260px;
+	}
+
 	.notice
 	{
 		position: absolute;

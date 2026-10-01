@@ -65,11 +65,33 @@ Extractors live in `Code/Resolver/Extractors/` and are registered in `Extractors
   come with plain URLs, so no signature deciphering is needed. The anonymous visitor ID from an embed page avoids the
   "confirm you're not a bot" wall. Each client's URLs are checked with a 1-byte range request, and a client whose
   downloads are refused (403) is skipped. The order is `bimp_yt_clients`. `FormatSelector` picks the formats.
+  `visionos` and `android_vr` list only a video's original audio: dubs are listed from the `ios` response (fetched for
+  the captions anyway), and a client asking for a dub tries `ios` and `android` after the configured clients, keeping
+  a plan without the dub only as the fallback. Channel live pages (`/@name/live`) are read for their canonical
+  `watch?v=` link, with the `SOCS` consent cookie (EU visitors otherwise get the cookie wall). `t=` / `start=` set
+  the queue item's `StartAt`, and the host's timeline starts there.
 - **Other sites** go through `SiteExtractor`. A site's progressive file is played directly and seeked natively. Failing
   that, its HLS playlist is used: live channels are followed at the live edge, and VODs are remuxed into local MP4
   segments from a start time, seeking by reopening like merged YouTube media. Twitch uses the web player's public GQL
   client ID and playback tokens. Kick, X (the embed API), archive.org and Bandcamp use public JSON or page data.
 - **`HlsExtractor`** probes a pasted `.m3u8` to decide between live and VOD.
+- **`DashExtractor`** plays a static `.mpd`. `MpdPlaylists` turns the manifest into the HLS playlists `HlsReader`
+  already reads (a master with one variant per video representation, the audio as a separate rendition, and a media
+  playlist per representation using `#EXT-X-MAP` and `#EXT-X-BYTERANGE`), so variant choice, A/V alignment, VOD start
+  times and fMP4 feeding are all the HLS path. Segments come from `SegmentTemplate` (timeline or fixed duration),
+  `SegmentList` or `SegmentBase` plus a `sidx` index (read lazily, only for the chosen representations). `System.Xml`
+  is off the sandbox whitelist, so `MpdPlaylists.Node` is a small XML reader of its own.
+- **`DailymotionExtractor`** reads the player metadata's HLS manifest, but Dailymotion's CDN answers 403 to the
+  sandbox's HTTP client whatever headers are sent (`Referer` and `Origin` can't be set), so it refuses with that
+  explanation. Measured 2026-10-01: curl gets 200 for the same URL.
+- **Playlists** (`IPlaylistExtractor`): `YouTubeExtractor` lists a `playlist?list=` link through the `next` endpoint
+  with the `WEB` client (the mobile clients answer with a different, panel-less response). `BimpResolver.ResolvePlaylistAsync`
+  returns lightweight `Lazy` queue items (link, title, length); `MediaPlayer` resolves each one properly when it's
+  played and skips it, with a notice, if that fails.
+- **Captions** (`ICaptionExtractor`, `Captions.cs`): the host lists a video's caption tracks into the synced
+  `MediaPlayer.CaptionTracks`; each client fetches its own cues (YouTube's `ios`, `android_vr` and `android` clients
+  list captions with downloadable URLs; `visionos` lists none and `web` needs a proof-of-origin token) and shows the
+  line for the synced time on `MediaScreen`. `Captions.Parse` reads json3 and timedtext XML.
 
 Sites change, and when one breaks the fix is in `Code/Resolver/Extractors/`. YouTube breaks most often; try
 `bimp_yt_clients` first, and `bimp_yt_formats <id>` shows what each client gets.
@@ -153,7 +175,8 @@ Measured from the sender's output to the screen, using RTCP sender reports, with
 | RTSP, AV1, keyframe every 1 s | `low` | **~1.3 s** (one keyframe interval plus the 0.15 s overlap) |
 | RTSP, AV1 | `normal` | 8.1 s |
 | RTSP / HTTP Motion JPEG | frame by frame | **~0.07 s** |
-| HLS | always `normal` | a few segments |
+| HLS | `normal` | about 4–5 segments |
+| HLS (YouTube live, 5 s segments) | `low` (default) | about 2 segments: it joins 2 segments (6 s at least) behind the newest instead of 4–5. YouTube's live HLS has no `EXT-X-PART` / `PRELOAD-HINT` / `SERVER-CONTROL` tags (measured 2026-10-01), so segment length is the floor |
 
 ### Smoothness
 
@@ -195,6 +218,21 @@ Found by measuring test files through the engine's own recorder and frame callba
 - **Uneven frame presentation:** the engine's `VideoPlayer` → texture path held frames (1–4 holds/s of 67 ms+), so
   `VideoFrameSink` uploads every `OnTextureData` frame itself.
 - **Black first frame:** a freshly opened player's first output is pure black; the sink skips leading black frames.
+- **AAC below 32 kHz:** the engine opens no audio for AAC at 16, 22.05 or 24 kHz (32, 44.1 and 48 kHz play) - which is
+  the core rate of every HE-AAC stream, so HE-AAC (YouTube live's 144p variant, many DASH manifests) played silent.
+  `Mp4Writer` declares twice the core rate in the `mp4a` sample entry when the core is below 32 kHz
+  (`AacConfig.OutputRate`), which is how Media Foundation is told a stream is HE-AAC, and `HlsReader` / `MpdPlaylists`
+  prefer AAC-LC variants. Direct files are played as they are.
+- **Errors the engine keeps to itself:** a direct url that answers with an error page (403, 404) leaves `VideoPlayer`
+  loading forever, so `MediaBackend.CheckReachable` reads the response headers itself and reports the status.
+- **H.264 with 16 reference frames:** the engine has no H.264 decoder of its own since it dropped FFmpeg - H.264 and
+  AAC go through a Windows Media Foundation fallback (AV1 is dav1d, VP9 libvpx). A stream with 16 reference frames
+  (`max_dec_frame_buffering` 16) plays at 26-27 fps with 60-200 ms holds whatever its bitrate (x264 controls,
+  2026-10-01: 24 Mbit/s 4 refs 29.6 fps / 3 holds, 24 Mbit/s 16 refs 26.5 / 35, 8 Mbit/s 16 refs 26.7 / 30; the CPU
+  wasn't the limit - no thread over 15% of a core). Patching the level doesn't help (the VUI states the buffer), and
+  the buffer can't be shrunk because the slices really use 16 references. It's inside the engine's MF integration
+  (likely the decoder's output latency against its late-frame dropping); `overlay_video 1` shows the engine's own
+  decode and queue numbers for video textures (`bimp_probe_texture`).
 - **Spectrum:** only `MusicPlayer` exposes a spectrum (raw FFT magnitudes, 257 bins); `SpectrumBars` maps it to dB
   with a treble tilt and auto-gain. Video playback has no spectrum, so the bars animate instead.
 

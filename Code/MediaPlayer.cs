@@ -140,6 +140,9 @@ public sealed class MediaPlayer : Component
 	/// <summary> Audio tracks of the current media (see <see cref="MediaQueueItem.AudioTracks"/>). </summary>
 	[Sync( SyncFlags.FromHost )] public string AudioTracks { get; set; }
 
+	/// <summary> Caption tracks of the current media (see <see cref="MediaQueueItem.CaptionTracks"/>). </summary>
+	[Sync( SyncFlags.FromHost )] public string CaptionTracks { get; set; }
+
 	//
 	// Per-client stream choices. Everyone shares the timeline, but picks their own resolution / audio language.
 	//
@@ -157,6 +160,55 @@ public sealed class MediaPlayer : Component
 	public string LocalStreamUrl => MediaStreamOptions.ApplyTo( PlayUrl, SelectedQuality, SelectedAudioTrack );
 
 	string CurrentKey => KeyFor( PlayId, LocalStreamUrl );
+
+	//
+	// Captions. Every client fetches its own cues (the urls can be tied to the IP) and shows them against the shared timeline.
+	//
+
+	public IReadOnlyList<MediaCaptionTrack> AvailableCaptionTracks => Captions.ParseTracks( CaptionTracks );
+
+	/// <summary> The caption track this client shows, null when captions are off or there are none. From the bimp_subs / bimp_sub_lang convars. </summary>
+	public MediaCaptionTrack SelectedCaptionTrack => MediaSettings.Subtitles ? Captions.Choose( AvailableCaptionTracks, MediaSettings.SubtitleLanguage ) : null;
+
+	/// <summary> The caption line to show right now, null for none. </summary>
+	public string CurrentCaption => HasMedia ? Captions.TextAt( captionCues, CurrentTime ) : null;
+
+	string captionKey;
+	int captionToken;
+	List<CaptionCue> captionCues;
+
+	/// <summary> Fetch the cues when the media or the chosen track changes. </summary>
+	void UpdateCaptions()
+	{
+		var track = HasMedia ? SelectedCaptionTrack : null;
+		var key = track is null ? null : $"{PlayId}|{track.Id}";
+		if ( key == captionKey ) return;
+
+		captionKey = key;
+		captionCues = null;
+		var token = ++captionToken;
+		if ( track is not null ) _ = LoadCaptionsAsync( token, track );
+	}
+
+	async Task LoadCaptionsAsync( int token, MediaCaptionTrack track )
+	{
+		try
+		{
+			var play = Bimp.Resolver.PlayToken.Parse( PlayUrl );
+			if ( Bimp.Resolver.Extractors.ExtractorRegistry.ByKey( play?.Extractor ) is not Bimp.Resolver.ICaptionExtractor source ) return;
+
+			var body = await source.GetCaptionsAsync( play.Id, track.Id, System.Threading.CancellationToken.None );
+			if ( token != captionToken || !this.IsValid() ) return;
+
+			var cues = Captions.Parse( body );
+			Log.Info( $"[bimp] captions {track.Id} ({track.Name}): {cues.Count} cues" );
+			captionCues = cues;
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( $"[bimp] Couldn't load captions: {e.Message}" );
+		}
+	}
 
 	//
 	// Local state
@@ -241,6 +293,7 @@ public sealed class MediaPlayer : Component
 		if ( !Application.IsDedicatedServer )
 		{
 			UpdatePlayback();
+			UpdateCaptions();
 			RecentLinks.Saw( this );
 		}
 
@@ -414,6 +467,19 @@ public sealed class MediaPlayer : Component
 
 		try
 		{
+			// a playlist link: the first video plays now, the rest are queued
+			var playlist = await Resolver.ResolvePlaylistAsync( url, AudioOnlyPlayer, MaxQueue + 1 );
+			if ( token != resolveToken || !this.IsValid() ) return;
+			if ( playlist is not null )
+			{
+				var first = await ResolveLazyAsync( playlist[0], requestedBy );
+				if ( token != resolveToken || !this.IsValid() ) return;
+
+				StartItem( first );
+				QueueLazy( playlist.Skip( 1 ), requestedBy, null );
+				return;
+			}
+
 			var item = await Resolver.ResolveAsync( url, AudioOnlyPlayer );
 			if ( token != resolveToken || !this.IsValid() ) return; // something newer was requested
 
@@ -424,7 +490,7 @@ public sealed class MediaPlayer : Component
 		{
 			if ( token != resolveToken || !this.IsValid() ) return;
 			Status = e is ResolveException ? e.Message : $"Error: {e.Message}";
-			Log.Warning( $"[bimp] Couldn't play {url}: {e.Message}" );
+			Log.Warning( $"[bimp] Couldn't play {url}: {(e is ResolveException ? e.Message : e.ToString())}" );
 		}
 	}
 
@@ -437,6 +503,26 @@ public sealed class MediaPlayer : Component
 
 		try
 		{
+			var playlist = await Resolver.ResolvePlaylistAsync( url, AudioOnlyPlayer, MaxQueue + 1 );
+			if ( !this.IsValid() ) return;
+			if ( playlist is not null )
+			{
+				var rest = playlist.AsEnumerable();
+				if ( !HasMedia && Status != "Loading..." )
+				{
+					var first = await ResolveLazyAsync( playlist[0], requestedBy );
+					if ( !this.IsValid() ) return;
+					if ( !HasMedia && Status != "Loading..." ) // nothing else started meanwhile
+					{
+						StartItem( first );
+						rest = playlist.Skip( 1 );
+					}
+				}
+
+				QueueLazy( rest, requestedBy, caller );
+				return;
+			}
+
 			var item = await Resolver.ResolveAsync( url, AudioOnlyPlayer );
 			if ( !this.IsValid() ) return;
 
@@ -458,6 +544,56 @@ public sealed class MediaPlayer : Component
 		}
 	}
 
+	/// <summary> A playlist entry resolved properly (qualities, dubs, live or not). Throws like <see cref="BimpResolver.ResolveAsync"/>. </summary>
+	async Task<MediaQueueItem> ResolveLazyAsync( MediaQueueItem entry, string requestedBy )
+	{
+		var item = await Resolver.ResolveAsync( entry.Url, AudioOnlyPlayer );
+		item.RequestedBy = requestedBy;
+		return item;
+	}
+
+	/// <summary> Add playlist entries to the queue until it's full, and say so if some didn't fit. </summary>
+	void QueueLazy( IEnumerable<MediaQueueItem> entries, string requestedBy, Connection caller )
+	{
+		int added = 0, left = 0;
+		foreach ( var entry in entries )
+		{
+			if ( Queue.Count >= MaxQueue ) { left++; continue; }
+			entry.RequestedBy = requestedBy;
+			Queue.Add( entry );
+			added++;
+		}
+
+		if ( left > 0 ) Deny( caller, $"Queued {added} videos - the queue is full, {left} more didn't fit." );
+	}
+
+	/// <summary> Play a queued playlist entry: resolve it first, and skip it (with a notice) if it can't be played. </summary>
+	async Task StartLazyAsync( MediaQueueItem entry )
+	{
+		var token = resolveToken;
+		Status = "Loading...";
+
+		try
+		{
+			var item = await ResolveLazyAsync( entry, entry.RequestedBy );
+			if ( token != resolveToken || !this.IsValid() ) return;
+			StartItem( item );
+		}
+		catch ( Exception e )
+		{
+			if ( token != resolveToken || !this.IsValid() ) return;
+
+			var why = e is ResolveException ? e.Message : $"Error: {e.Message}";
+			Log.Warning( $"[bimp] Couldn't play {entry.Url}: {e.Message}" );
+
+			var notice = $"Skipped \"{entry.Title}\": {why}";
+			if ( Networking.IsActive ) ReceiveNotice( notice );
+			else ShowNotice( notice );
+
+			PlayNext();
+		}
+	}
+
 	void StartItem( MediaQueueItem item )
 	{
 		CurrentUrl = item.Url;
@@ -470,9 +606,11 @@ public sealed class MediaPlayer : Component
 		SeekByReload = item.SeekByReload;
 		Qualities = item.Qualities;
 		AudioTracks = item.AudioTracks;
+		CaptionTracks = item.CaptionTracks;
 		Paused = false;
 		PausedAt = 0;
-		StartTime = Time.NowDouble;
+		// a link with a start time (?t=90) plays from there, the way a late joiner starts mid-way
+		StartTime = Time.NowDouble - (item.IsLive ? 0 : Math.Max( 0, item.StartAt ));
 		Status = null;
 		PlayId++;
 	}
@@ -490,7 +628,8 @@ public sealed class MediaPlayer : Component
 		{
 			var next = Queue[0];
 			Queue.RemoveAt( 0 );
-			StartItem( next );
+			if ( next.Lazy ) _ = StartLazyAsync( next );
+			else StartItem( next );
 			return;
 		}
 
@@ -511,6 +650,7 @@ public sealed class MediaPlayer : Component
 		RequestedBy = null;
 		Qualities = null;
 		AudioTracks = null;
+		CaptionTracks = null;
 		MediaDuration = 0;
 		IsLive = false;
 		Paused = false;
@@ -640,7 +780,7 @@ public sealed class MediaPlayer : Component
 		var t = CurrentTime;
 		var url = LocalStreamUrl;
 
-		Backend = IsLive ? MediaBackend.CreateLive( url, Math.Clamp( MediaSettings.MaxVideoHeight, 144, 2160 ) )
+		Backend = IsLive ? MediaBackend.CreateLive( url, Math.Clamp( MediaSettings.MaxVideoHeight, 144, 2160 ), AudioOnly )
 			: PlayToken.IsToken( url ) ? MediaBackend.CreateNative( url, AudioOnly, SeekByReload && !IsLive ? t : 0 )
 			: MediaBackend.Create( url, AudioOnly, 0 );
 		sinceCorrection = 0;

@@ -75,12 +75,46 @@ public sealed class BimpResolver
 			Title = string.IsNullOrWhiteSpace( info.Title ) ? uri.ToString() : info.Title,
 			Duration = info.IsLive ? 0 : Math.Max( 0, info.Duration ),
 			IsLive = info.IsLive,
+			// a start time past the end (or on a live stream) is ignored
+			StartAt = !info.IsLive && info.StartAt > 0 && (info.Duration <= 0 || info.StartAt < info.Duration - 1) ? info.StartAt : 0,
 			AudioOnly = audio,
 			// merged media plays from local segment files starting at a time - it seeks by reopening
 			SeekByReload = info.Merged && !info.IsLive,
 			Qualities = audio ? null : MediaStreamOptions.EncodeQualities( info.Qualities ),
 			AudioTracks = MediaStreamOptions.EncodeAudioTracks( info.AudioTracks ),
+			CaptionTracks = Captions.EncodeTracks( info.CaptionTracks ),
 		};
+	}
+
+	/// <summary>
+	/// If the link is a playlist (and not a single video from one), its videos as <see cref="MediaQueueItem.Lazy"/> items -
+	/// url, title and length only; resolve each with <see cref="ResolveAsync"/> when it's played. Null for anything else.
+	/// Host only.
+	/// </summary>
+	public async Task<List<MediaQueueItem>> ResolvePlaylistAsync( string input, bool audioOnly, int max )
+	{
+		if ( Networking.IsActive && !Networking.IsHost )
+			throw new InvalidOperationException( "Only the host resolves media." );
+
+		if ( max < 1 || !MediaSource.TryNormalize( input, out var uri ) ) return null;
+		if ( ExtractorRegistry.For( uri ) is not IPlaylistExtractor lister ) return null;
+
+		List<PlaylistEntry> entries;
+		try
+		{
+			entries = await lister.GetPlaylistAsync( uri, max, CancellationToken.None );
+			if ( entries is not null ) Log.Info( $"[bimp] playlist {uri}: {entries.Count} videos" );
+		}
+		catch ( ResolveException )
+		{
+			throw;
+		}
+		catch ( Exception e )
+		{
+			throw new ResolveException( $"Couldn't read that playlist: {e.Message}" );
+		}
+
+		return entries?.Select( e => new MediaQueueItem { Url = e.Url, Title = e.Title, Duration = e.Duration, AudioOnly = audioOnly, Lazy = true } ).ToList();
 	}
 
 	Task<MediaInfo> GetInfoAsync( IExtractor extractor, Uri uri, bool audioOnly )

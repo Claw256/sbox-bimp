@@ -117,6 +117,18 @@ public static class InnerTubeClients
 		},
 	};
 
+	/// <summary>
+	/// The website's client. Not in <see cref="All"/> (its formats need the signature cipher): only used for the "next"
+	/// endpoint, where it answers with a playlist's whole panel, which the mobile clients don't.
+	/// </summary>
+	public static readonly InnerTubeClient Web = new()
+	{
+		Key = "web",
+		Name = "WEB",
+		Version = "2.20250312.04.00",
+		Id = 1,
+	};
+
 	public static readonly IReadOnlyList<InnerTubeClient> All = new[] { VisionOs, AndroidVr, Ios, Android };
 
 	public const string DefaultOrder = "visionos,android_vr,ios";

@@ -89,6 +89,14 @@ public sealed class AacConfig
 	}
 
 	public bool SameAs( AacConfig o ) => o is not null && Asc.AsSpan().SequenceEqual( o.Asc );
+
+	/// <summary>
+	/// The rate the mp4a sample entry declares. The engine's AAC decoder (Media Foundation) won't open audio below
+	/// 32 kHz - measured 2026-10-01: 16, 22.05 and 24 kHz AAC-LC play nothing, 32/44.1/48 kHz play - and an HE-AAC
+	/// stream's core (all the ASC says when the SBR is implicit, as from ADTS) is half its real rate. Declaring twice
+	/// the core is how Media Foundation is told the stream is HE-AAC: it then opens it at the doubled rate.
+	/// </summary>
+	public int OutputRate => SampleRate is > 0 and < 32000 ? SampleRate * 2 : SampleRate;
 }
 
 /// <summary>
@@ -275,7 +283,7 @@ public static class Mp4Writer
 		return Box( "mp4a", Concat(
 			new byte[6], U16( 1 ), new byte[8],
 			U16( (ushort)aac.Channels ), U16( 16 ), U16( 0 ), U16( 0 ),
-			U32( (uint)Math.Min( aac.SampleRate, 65535 ) << 16 ),
+			U32( (uint)Math.Min( aac.OutputRate, 65535 ) << 16 ),
 			FullBox( "esds", 0, 0, es ) ) );
 	}
 

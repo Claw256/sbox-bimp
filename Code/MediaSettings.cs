@@ -24,7 +24,8 @@ public static class MediaSettings
 	/// Live latency mode for RTSP and MPEG-TS streams. "low": a segment per keyframe interval and no overlap, so the
 	/// delay is about one keyframe interval plus ~0.2 s (a camera with a 1 s keyframe interval plays about 1.2 s
 	/// behind). "normal": longer segments (bimp_live_segment) with fewer decoder restarts, ~2 segments behind.
-	/// HLS always plays normal. Takes effect on the next stream.
+	/// HLS segments always play the normal way (a whole segment arrives at once), but in "low" it joins about 6-10 s
+	/// behind the newest segment instead of 4-5 segments. Takes effect on the next stream.
 	/// </summary>
 	[ConVar( "bimp_live_latency", ConVarFlags.Saved, Help = "Live stream latency: low (about one keyframe interval) or normal (bimp_live_segment segments)" )]
 	public static string LiveLatency { get; set; } = "low";
@@ -85,6 +86,18 @@ public static class MediaSettings
 	/// </summary>
 	[ConVar( "bimp_audio_lang", ConVarFlags.Saved, Help = "Preferred audio track language for dubbed videos (e.g. es, ja). Empty = original" )]
 	public static string AudioLanguage { get; set; } = "";
+
+	/// <summary>
+	/// Show captions on the screens, for videos that have them.
+	/// </summary>
+	[ConVar( "bimp_subs", ConVarFlags.Saved, Help = "Show captions on media screens (1 = on)" )]
+	public static bool Subtitles { get; set; } = false;
+
+	/// <summary>
+	/// Preferred caption language, e.g. "en" or "pt-BR". Empty = the first written track the video has.
+	/// </summary>
+	[ConVar( "bimp_sub_lang", ConVarFlags.Saved, Help = "Preferred caption language (e.g. en, es, pt-BR). Empty = the video's first written track" )]
+	public static string SubtitleLanguage { get; set; } = "";
 
 	/// <summary>
 	/// Log screen aiming / button hit-testing, for diagnosing the on-screen controls.

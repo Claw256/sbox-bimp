@@ -197,9 +197,9 @@ public sealed class MediaBackend : IDisposable
 	/// Connect to a live stream (RTSP tunnelled over HTTP, MPEG-TS over HTTP, HLS) and play it near its live edge.
 	/// Never throws, check <see cref="Error"/>.
 	/// </summary>
-	public static MediaBackend CreateLive( string url, int maxHeight )
+	public static MediaBackend CreateLive( string url, int maxHeight, bool audioOnly = false )
 	{
-		var b = new MediaBackend { Url = url, SinceCreated = 0, liveMaxHeight = maxHeight };
+		var b = new MediaBackend { Url = url, SinceCreated = 0, audioOnly = audioOnly, liveMaxHeight = audioOnly ? AudioOnlyHeight : maxHeight };
 		try
 		{
 			// a live channel from an extractor (Twitch...): resolved on this client first (see StartNative)
@@ -219,6 +219,12 @@ public sealed class MediaBackend : IDisposable
 	}
 
 	int liveMaxHeight = 720;
+
+	/// <summary>
+	/// The variant height an audio-only player (a speaker) asks a live or HLS stream for: the audio comes with every
+	/// variant, so the smallest one saves the download and the decoding of a picture nobody sees.
+	/// </summary>
+	const int AudioOnlyHeight = 144;
 
 	void StartLive( string url, bool hls )
 	{
@@ -312,11 +318,35 @@ public sealed class MediaBackend : IDisposable
 				video.OnFinished += () => Finished = true;
 				video.Play( url );
 			}
+			_ = CheckReachable( url );
 		}
 		catch ( Exception e )
 		{
 			Error = e.Message;
 			Log.Warning( $"[bimp] Failed to play {url}: {e.Message}" );
+		}
+	}
+
+	/// <summary>
+	/// The engine's players give up on a url that answers with an error page (a 403, a 404) without saying so - the
+	/// screen would sit on "loading" for good. Look at the response's status ourselves. Headers only: a radio stream
+	/// never ends, and a buffered request would never return.
+	/// </summary>
+	async Task CheckReachable( string url )
+	{
+		if ( !url.StartsWith( "http", StringComparison.OrdinalIgnoreCase ) ) return;
+		try
+		{
+			using var stream = await Http.RequestStreamAsync( url, cancellationToken: cts.Token );
+		}
+		catch ( System.Net.Http.HttpRequestException e ) when ( e.StatusCode is { } status && !loaded && !disposed )
+		{
+			Error = $"The server refused the file ({(int)status}).";
+			Log.Warning( $"[bimp] {url}: {(int)status}" );
+		}
+		catch ( Exception )
+		{
+			// unreachable, cancelled: the engine's own load decides
 		}
 	}
 
@@ -336,7 +366,7 @@ public sealed class MediaBackend : IDisposable
 
 		if ( plan.Kind == StreamKind.Live )
 		{
-			liveMaxHeight = TokenHeight( token, liveMaxHeight );
+			liveMaxHeight = audioOnly ? AudioOnlyHeight : TokenHeight( token, liveMaxHeight );
 			StartLive( plan.DirectUrl, true );
 			return;
 		}
@@ -354,7 +384,7 @@ public sealed class MediaBackend : IDisposable
 		if ( plan.Kind == StreamKind.Hls )
 		{
 			// a finished HLS playlist: remuxed from the segment at (or just after) the planned start, like merged media
-			live = new Resolver.Live.LiveStream( plan.DirectUrl, StreamSessions.NewCacheDirectory(), TokenHeight( token, 720 ), true, plannedStart, maxLag );
+			live = new Resolver.Live.LiveStream( plan.DirectUrl, StreamSessions.NewCacheDirectory(), audioOnly ? AudioOnlyHeight : TokenHeight( token, 720 ), true, plannedStart, maxLag );
 			segments = new SegmentPlayer( live.Segmenter );
 			return;
 		}

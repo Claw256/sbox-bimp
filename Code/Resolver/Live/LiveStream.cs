@@ -102,8 +102,18 @@ public sealed class LiveStream : IDisposable
 			}
 			else if ( hls )
 			{
-				Description = vodStart is null ? "HLS" : "HLS VOD";
-				await new HlsReader( uri, Segmenter, maxHeight, WaitForPlayback, vodStart ?? 0, vodMaxLag ).Run( ct );
+				if ( MpdPlaylists.IsMpd( uri ) )
+				{
+					// a DASH manifest, read as the HLS playlists it converts to
+					Description = "DASH VOD";
+					var mpd = await MpdPlaylists.LoadAsync( uri, ct );
+					await new HlsReader( mpd.Master, Segmenter, maxHeight, WaitForPlayback, vodStart ?? 0, vodMaxLag, mpd.FetchAsync ).Run( ct );
+				}
+				else
+				{
+					Description = vodStart is null ? "HLS" : "HLS VOD";
+					await new HlsReader( uri, Segmenter, maxHeight, WaitForPlayback, vodStart ?? 0, vodMaxLag ).Run( ct );
+				}
 			}
 			else
 			{

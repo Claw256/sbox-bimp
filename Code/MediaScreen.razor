@@ -46,6 +46,16 @@
 
 	@if ( Player is not null && Player.HasMedia )
 	{
+		@if ( !string.IsNullOrEmpty( CaptionText ) )
+		{
+			<div class="subs">
+				@foreach ( var line in CaptionText.Split( '\n' ) )
+				{
+					<div class="subs-line">@line</div>
+				}
+			</div>
+		}
+
 		@if ( Player.Backend is not null && !Player.Backend.Loaded && Player.Backend.Error is null )
 		{
 			<div class="loading"><i>hourglass_top</i> Loading...</div>
@@ -670,6 +680,9 @@
 
 	#endregion
 
+	/// <summary> The caption line(s) to show now, null for none (see <see cref="MediaPlayer.CurrentCaption"/>). </summary>
+	string CaptionText => Player?.CurrentCaption;
+
 	protected override int BuildHash()
 	{
 		if ( Player is null ) return 0;
@@ -677,7 +690,7 @@
 		return HashCode.Combine(
 			HashCode.Combine( Player.PlayId, Player.HasMedia, Player.Title, Player.Paused, Player.Status, Player.LocalNotice, Player.Queue.Count ),
 			HashCode.Combine( (int)Player.CurrentTime, Player.MediaDuration, Player.Backend?.Loaded, Player.Backend?.HasVideo, Player.CanLocalControl, RootClass ),
-			HashCode.Combine( FlashIcon, flashId, AimedControl, UseAction )
+			HashCode.Combine( FlashIcon, flashId, AimedControl, UseAction, CaptionText )
 		);
 	}
 }

@@ -72,7 +72,7 @@
 				</div>
 			}
 
-			@if ( Target.HasMedia && (Target.AvailableQualities.Count > 0 || Target.AvailableAudioTracks.Count > 0) )
+			@if ( Target.HasMedia && (Target.AvailableQualities.Count > 0 || Target.AvailableAudioTracks.Count > 0 || Target.AvailableCaptionTracks.Count > 0) )
 			{
 				<div class="stream-options">
 					@if ( Target.AvailableQualities.Count > 0 )
@@ -87,6 +87,13 @@
 						<div class="option">
 							<i>translate</i>
 							<DropDown class="audio-track nav" Value="@AudioTrackValue" ValueChanged="@OnAudioTrackChanged" BuildOptions="@BuildAudioTrackOptions"></DropDown>
+						</div>
+					}
+					@if ( Target.AvailableCaptionTracks.Count > 0 )
+					{
+						<div class="option">
+							<i>closed_caption</i>
+							<DropDown class="audio-track nav" Value="@CaptionValue" ValueChanged="@OnCaptionChanged" BuildOptions="@BuildCaptionOptions"></DropDown>
 						</div>
 					}
 					<div class="playing-as">@PlayingAsText</div>
@@ -516,6 +523,33 @@
 		MediaSettings.AudioLanguage = track is null || track.IsDefault ? "" : track.Id;
 	}
 
+	//
+	// Captions: off, or a language. The choice is this player's own (saved convars) and applies to every media player.
+	// Auto-generated tracks are only offered for languages without a written one - that's what picking a language gets.
+	//
+
+	IEnumerable<MediaCaptionTrack> ListedCaptionTracks
+		=> Target.AvailableCaptionTracks.Where( t => !t.IsAuto || !Target.AvailableCaptionTracks.Any( w => !w.IsAuto && w.Lang == t.Lang ) );
+
+	string CaptionValue => Target.SelectedCaptionTrack?.Id ?? "";
+
+	List<Option> BuildCaptionOptions()
+	{
+		var list = new List<Option> { new Option( "Captions off", "" ) };
+		foreach ( var t in ListedCaptionTracks )
+			list.Add( new Option( t.IsAuto && !t.Name.Contains( "auto", StringComparison.OrdinalIgnoreCase ) ? $"{t.Name} (auto-generated)" : t.Name, t.Id ) );
+		return list;
+	}
+
+	void OnCaptionChanged( string id )
+	{
+		if ( id == CaptionValue ) return;
+
+		var track = Target.AvailableCaptionTracks.FirstOrDefault( t => t.Id == id );
+		MediaSettings.Subtitles = track is not null;
+		if ( track is not null ) MediaSettings.SubtitleLanguage = track.Lang;
+	}
+
 	string PlayingAsText
 	{
 		get
@@ -579,7 +613,8 @@
 		return HashCode.Combine(
 			HashCode.Combine( Target.PlayId, Target.Title, Target.Paused, Target.Status, Target.LocalNotice, (int)Target.CurrentTime, Target.MediaDuration ),
 			HashCode.Combine( QueueHash(), MediaSettings.Mute, MediaSettings.Volume, MediaSettings.SpatialAudio, Target.CanLocalControl, pendingSeek, PadMode ),
-			HashCode.Combine( Target.Qualities, Target.AudioTracks, MediaSettings.Quality, MediaSettings.AudioLanguage, PlayingAsText, ShowRecent, RecentLinks.Version )
+			HashCode.Combine( Target.Qualities, Target.AudioTracks, MediaSettings.Quality, MediaSettings.AudioLanguage, PlayingAsText, ShowRecent, RecentLinks.Version ),
+			HashCode.Combine( Target.CaptionTracks, MediaSettings.Subtitles, MediaSettings.SubtitleLanguage )
 		);
 	}
 

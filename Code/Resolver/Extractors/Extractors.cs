@@ -18,7 +18,9 @@ public static class ExtractorRegistry
 		new XExtractor(),
 		new ArchiveExtractor(),
 		new BandcampExtractor(),
+		new DailymotionExtractor(),
 		new HlsExtractor(), // any .m3u8 link
+		new DashExtractor(), // any .mpd link
 		new LabExtractor(), // [probe] loopback test media
 	};
 

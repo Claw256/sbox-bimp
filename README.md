@@ -33,6 +33,8 @@ in sync. Everything runs inside the game: there's no server to host, no proxy an
   carries on as VP9 1440p60.
 - **Your own quality and language.** Each player picks a resolution (144p–4K) and, for dubbed videos, an audio
   language. Everyone stays on the same timeline.
+- **Captions** for YouTube videos that have them: pick a language (or off) in the remote, and the lines show on
+  the screen.
 - **Live streams and cameras:** HLS, MPEG-TS, RTSP (over HTTP tunnelling) and Motion JPEG, with about a second of
   latency for a well-configured source.
 - **A queue** with "requested by", and a **Recent** list of links you've played, to play or queue again.
@@ -47,8 +49,10 @@ in sync. Everything runs inside the game: there's no server to host, no proxy an
 
 | Link | How it plays |
 |---|---|
-| YouTube videos, shorts, `youtu.be`, YouTube Music, playlists (first video) | merged locally from YouTube's own files, VP9/AV1 + Opus |
-| YouTube live | live |
+| YouTube videos, shorts, `youtu.be`, YouTube Music | merged locally from YouTube's own files, VP9/AV1 + Opus. A start time in the link (`t=90`, `t=1m30s`) is honoured |
+| YouTube playlists (`/playlist?list=…`) | the first video plays and the rest are queued (up to the queue limit); a link to one video from an ordinary playlist plays just that video |
+| YouTube Mix / radio (`watch?v=…&list=RD…`) | that video plays and the mix is queued after it |
+| YouTube live, and a channel's live page (`/@channel/live`) | live, joined about 13 s behind the newest segment (YouTube's HLS has 5 s segments and no low latency parts) |
 | Twitch channels, VODs (`/videos/…`), clips | channels live, VODs seekable, clips as MP4 |
 | Kick channels and VODs | live, and seekable VODs |
 | Vimeo | MP4, or its HLS stream (seekable). DRM-protected videos are refused |
@@ -59,17 +63,31 @@ in sync. Everything runs inside the game: there's no server to host, no proxy an
 | `.webm` `.mp4` `.mkv` `.mov` `.m4v` | played directly |
 | `.mp3` `.ogg` `.opus` `.flac` `.wav` `.m4a`, Icecast radio | played directly, audio only |
 | `.m3u8` (HLS) | a finished playlist plays as a seekable video, a growing one live |
+| `.mpd` (DASH) | a finished (static) manifest plays as a seekable video: one period, fragmented MP4 with H.264 or AV1 video and AAC audio, segments by template, list or `sidx` index |
 | `.ts` `.m2ts` `.mts` over HTTP | live MPEG-TS, or a finished file |
 | `rtsp://` `rtspt://` `rtsps://` | live, over RTSP-over-HTTP tunnelling (see [Live streams and cameras](#live-streams-and-cameras)) |
 | `.mjpg` `.mjpeg`, `/mjpg/…`, `?action=stream` | live Motion JPEG camera |
 
 **Not supported:**
-- DASH (`.mpd`), DRM and encrypted HLS.
+- DRM and encrypted HLS or DASH. Live (dynamic) DASH, DASH with several periods, and WebM DASH.
 - H.265 anywhere: the engine has no decoder for it.
-- Dailymotion: its CDN refuses the HTTP client sandboxed code has to use.
+- Dailymotion: links are understood, but its CDN (Cloudflare) answers 403 to the HTTP client sandboxed code has to
+  use, whatever headers are sent, so they're refused with an explanation. It will start working if that changes.
+- Captions for anything but YouTube (HLS and Dailymotion subtitle tracks aren't read yet).
 - Reddit: it only serves a bot check.
 - Mixcloud: its streams are obfuscated with a key that asks not to download them.
 - YouTube age-restricted, private and members-only videos, since there's no sign-in.
+
+**Known engine limits:**
+- H.264 encoded with many reference frames (x264's `slower`/`veryslow` presets, `-refs 16`) stutters, local or over
+  HTTP, at any bitrate: 26-27 fps with holds up to 200 ms for 1080p30. The engine decodes H.264 only through its
+  Windows Media Foundation fallback; the same clip with 4 references plays at 30 (measured at 8 and 24 Mbit/s).
+  AV1 and VP9 use other decoders (dav1d, libvpx) and aren't affected.
+- The engine's AAC decoder won't open audio below 32 kHz, which is every HE-AAC stream's core rate. BIMP's remuxed
+  streams (HLS, DASH, live) declare HE-AAC at its real rate so it plays, and prefer AAC-LC variants when there are
+  any; a direct file with HE-AAC or low-rate AAC audio plays silent.
+- The first segment swap of a live or remuxed stream can hold one frame (60-70 ms) while BIMP learns how early to
+  open the next segment.
 
 ## Playing media (for players)
 
@@ -224,9 +242,11 @@ Console variables. "Client, saved" ones are each player's own and are remembered
 | `bimp_spatial` | client, saved | `1` (default) = 3D audio from media players, `0` = flat 2D audio for you: no direction, but still fading with distance |
 | `bimp_quality` | client, saved | Your preferred YouTube resolution, e.g. `1080`. `0` = auto (up to `bimp_max_height`). If a video doesn't have it, the next height down is used |
 | `bimp_audio_lang` | client, saved | Your preferred audio language for dubbed videos, e.g. `es`, `ja`. Empty = the original |
+| `bimp_subs` | client, saved | `1` = show captions on the screens for videos that have them (default `0`) |
+| `bimp_sub_lang` | client, saved | Your preferred caption language, e.g. `en`, `pt-BR`. Empty = the video's first written track. Auto-generated captions are used only for languages without a written track |
 | `bimp_ui_scale` | client, saved | Size of the remote (default `1.4`). It scales with the screen height; this multiplies that, never wider than 90% of the screen |
 | `bimp_av1` | client, saved | YouTube 4K60 as AV1 while YouTube serves it, then VP9 1440p60 (default `1`). `0` = VP9 4K60 throughout, which the engine plays at 19–45 fps |
-| `bimp_live_latency` | client, saved | Live latency: `low` (default, about one keyframe interval) or `normal` (a couple of segments behind, fewer decoder starts) |
+| `bimp_live_latency` | client, saved | Live latency: `low` (default, about one keyframe interval; HLS joins about 6–10 s behind the newest segment) or `normal` (a couple of segments behind, fewer decoder starts) |
 | `bimp_live_segment` | client, saved | `normal` latency only: minimum live segment length in seconds (default 4) |
 | `bimp_max_height` | server, replicated | The highest video height clients stream (default 720). Lower it for players on slow connections |
 | `bimp_yt_clients` | server, replicated | YouTube clients to try, in order (default `visionos,android_vr,ios`). Change it if YouTube stops serving one |

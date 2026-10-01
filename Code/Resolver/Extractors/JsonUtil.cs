@@ -42,6 +42,29 @@ internal static class JsonUtil
 	public static IEnumerable<JsonNode> Items( this JsonNode node )
 		=> node is JsonArray a ? a.Where( x => x is not null ) : Enumerable.Empty<JsonNode>();
 
+	/// <summary> Every object property with this name, in document order (not searching inside a match). </summary>
+	public static IEnumerable<JsonNode> FindAll( this JsonNode node, string name )
+	{
+		switch ( node )
+		{
+			case JsonObject o:
+				foreach ( var (key, child) in o )
+				{
+					if ( key == name && child is not null ) yield return child;
+					else if ( child is not null )
+						foreach ( var found in child.FindAll( name ) ) yield return found;
+				}
+				break;
+			case JsonArray a:
+				foreach ( var child in a )
+				{
+					if ( child is null ) continue;
+					foreach ( var found in child.FindAll( name ) ) yield return found;
+				}
+				break;
+		}
+	}
+
 	/// <summary> Depth first search for the first object property with this name. </summary>
 	public static JsonNode Find( this JsonNode node, string name )
 	{
