@@ -88,8 +88,9 @@ public sealed class MediaPlayer : Component
 	/// <summary> How loud this player is at a point, from <see cref="AudioFalloff"/> over <see cref="AudioDistance"/>. </summary>
 	float DistanceFade( Vector3 listener )
 	{
-		if ( AudioDistance <= 0 ) return 1;
-		return AudioFalloff.Evaluate( (listener.Distance( SoundPosition ) / AudioDistance).Clamp( 0, 1 ) );
+		var range = ScaledAudioDistance;
+		if ( range <= 0 ) return 1;
+		return AudioFalloff.Evaluate( (listener.Distance( SoundPositionFor( listener ) ) / range).Clamp( 0, 1 ) );
 	}
 
 	/// <summary>
@@ -259,6 +260,45 @@ public sealed class MediaPlayer : Component
 	static BimpResolver Resolver => BimpResolver.Instance;
 
 	public Vector3 SoundPosition => SoundOrigin.IsValid() ? SoundOrigin.WorldPosition : WorldPosition;
+
+	BoxCollider soundBox;
+
+	/// <summary> The object the sound comes from: <see cref="SoundOrigin"/>, or this one. </summary>
+	GameObject SoundObject => SoundOrigin.IsValid() ? SoundOrigin : GameObject;
+
+	/// <summary>
+	/// How much bigger (or smaller) than its prefab this player has been scaled, e.g. by the Sandbox resize tool.
+	/// The audio range grows with it, so a bigger screen is heard from further away.
+	/// </summary>
+	public float SoundScale
+	{
+		get
+		{
+			var s = SoundObject.WorldScale;
+			return MathF.Max( 0.01f, MathF.Max( MathF.Abs( s.x ), MathF.Max( MathF.Abs( s.y ), MathF.Abs( s.z ) ) ) );
+		}
+	}
+
+	/// <summary> <see cref="AudioDistance"/> at the current size. </summary>
+	public float ScaledAudioDistance => AudioDistance * SoundScale;
+
+	/// <summary>
+	/// Where the sound is heard from for a listener. A scaled-up screen is a big surface, not a point, so the sound comes
+	/// from the nearest point of its box (the listener's own position when inside it), and fades from there.
+	/// </summary>
+	Vector3 SoundPositionFor( Vector3 listener )
+	{
+		if ( SoundOrigin.IsValid() ) return SoundOrigin.WorldPosition;
+
+		if ( !soundBox.IsValid() ) soundBox = GetComponent<BoxCollider>();
+		if ( !soundBox.IsValid() ) return WorldPosition;
+
+		var tx = soundBox.GameObject.WorldTransform;
+		var half = soundBox.Scale * 0.5f;
+		var local = tx.PointToLocal( listener ) - soundBox.Center;
+		local = new Vector3( local.x.Clamp( -half.x, half.x ), local.y.Clamp( -half.y, half.y ), local.z.Clamp( -half.z, half.z ) );
+		return tx.PointToWorld( local + soundBox.Center );
+	}
 
 	protected override void OnAwake()
 	{
@@ -814,7 +854,7 @@ public sealed class MediaPlayer : Component
 		Backend.Present();
 		var volume = Volume * MediaSettings.EffectiveVolume;
 		if ( FlatWithDistance ) volume *= DistanceFade( Sound.Listener.Position );
-		Backend.SetAudio( SoundPosition, EffectiveSpatial, volume, AudioDistance );
+		Backend.SetAudio( SoundPositionFor( Sound.Listener.Position ), EffectiveSpatial, volume, ScaledAudioDistance );
 
 		if ( Backend.Error is not null )
 		{
