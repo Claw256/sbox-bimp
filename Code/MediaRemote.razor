@@ -127,7 +127,7 @@
 			<div class="queue">
 				<div class="queue-header">
 					<div class="tab nav @(ShowRecent ? "" : "active")" onclick="@( () => ShowRecent = false )">Up next <span class="count">@Target.Queue.Count / @Target.MaxQueue</span></div>
-					<div class="tab nav @(ShowRecent ? "active" : "")" onclick="@( () => ShowRecent = true )">Recent <span class="count">@RecentLinks.All.Count</span></div>
+					<div class="tab nav @(ShowRecent ? "active" : "")" onclick="@( () => ShowRecent = true )">Recent <span class="count">@RecentLinks.Get( Target.Scene ).Count</span></div>
 					<div class="spacer"></div>
 					@if ( !ShowRecent && Target.CanLocalControl && Target.Queue.Count > 0 )
 					{
@@ -138,12 +138,12 @@
 				<div class="queue-list">
 					@if ( ShowRecent )
 					{
-						@if ( RecentLinks.All.Count == 0 )
+						@if ( RecentLinks.Get( Target.Scene ).Count == 0 )
 						{
-							<div class="empty">Links you play show up here.</div>
+							<div class="empty">Links played in this scene show up here.</div>
 						}
 
-						@foreach ( var recent in RecentLinks.All )
+						@foreach ( var recent in RecentLinks.Get( Target.Scene ) )
 						{
 							var url = recent.Url;
 							<div class="queue-item recent">
@@ -160,7 +160,7 @@
 								{
 									<div class="small-btn go nav" onclick="@( () => Target.RequestEnqueue( url ) )"><i>playlist_add</i></div>
 								}
-								<div class="small-btn nav" onclick="@( () => RecentLinks.Remove( url ) )"><i>close</i></div>
+								<div class="small-btn nav" onclick="@( () => RecentLinks.Remove( Target.Scene, url ) )"><i>close</i></div>
 							</div>
 						}
 					}
@@ -229,7 +229,7 @@
 
 	TextEntry UrlEntry { get; set; }
 
-	/// <summary> The list shows the links this client has played (<see cref="RecentLinks"/>) instead of the queue. </summary>
+	/// <summary> The list shows the links played in this scene (<see cref="RecentLinks"/>) instead of the queue. </summary>
 	bool ShowRecent { get; set; }
 
 	RealTimeSince sinceOpened = 0;

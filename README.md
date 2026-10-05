@@ -37,7 +37,7 @@ in sync. Everything runs inside the game: there's no server to host, no proxy an
   the screen.
 - **Live streams and cameras:** HLS, MPEG-TS, RTSP (over HTTP tunnelling) and Motion JPEG, with about a second of
   latency for a well-configured source.
-- **A queue** with "requested by", and a **Recent** list of links you've played, to play or queue again.
+- **A queue** with "requested by", and a **Recent** list of links played in the current scene, to play or queue again.
 - **3D positional audio** with distance falloff, or flat audio.
 - **Speakers:** an audio-only mode for radios and jukeboxes, with a spectrum visualiser.
 - **In-world controls** you point at, plus a full on-screen **remote** opened with USE.
@@ -114,8 +114,8 @@ The remote is the full set of controls:
   their own. Changing one reloads your picture at the same moment.
 - **A link box:** paste a link and press **Play now** (or Enter) or **Queue**.
 - **Up next**, the queue, with a remove button on each item and Clear (if you're allowed to control the player).
-- **Recent**, the links you've played on any player, newest first, with title, link and length. Press ▶ to play one
-  again or + to queue it. They're kept on your machine.
+- **Recent**, the links played on players in the current scene, newest first, with title, link and length. Press ▶ to play one
+  again or + to queue it. They're kept in memory only, so a new server or scene starts empty.
 - **Your volume** for all media players, mute, and a **3D / 2D** button: 3D audio comes from the screen and fades with
   distance; 2D has no direction (it's centred, like headphones), but still gets quieter the further away you are.
   These are yours only, and apply to every media player.

@@ -251,6 +251,6 @@ Found by measuring test files through the engine's own recorder and frame callba
   own selection.
 - **`MenuStyle`** gives the remote's drop down menus a stylesheet matching the remote: popups live in the root panel,
   where a component's stylesheet doesn't reach.
-- **`RecentLinks`** keeps the links a client has seen played, in `data/bimp/recent.json`.
+- **`RecentLinks`** keeps the links played in each scene, in memory only (never saved, so another server or scene starts empty).
 - **`MediaRemote`** is a `ScreenPanel` created on demand; it scales with the screen height (as if 1080 high) times
   `bimp_ui_scale`, capped at 90% of the screen width.
