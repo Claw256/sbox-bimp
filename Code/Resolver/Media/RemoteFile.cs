@@ -282,6 +282,8 @@ public sealed class RemoteFile
 				// no User-Agent here: the engine rejects setting it (measured 2026-10-02), so media GETs can't
 				// claim the minting client's identity - a refusal recovers by re-resolving past that client
 				var headers = new Dictionary<string, string> { ["Range"] = $"bytes={start}-{start + count - 1}" };
+				var requestStart = Trace.On ? Trace.Now : 0;
+				Trace.Mark( TraceId.DownloadBegin, count );
 
 				// [probe] bimp_probe_refuse: answer 403 without asking the server, so the refresh and the
 				// session re-resolve can be exercised on demand
@@ -305,6 +307,7 @@ public sealed class RemoteFile
 						continue;
 					}
 
+					if ( Trace.On ) Trace.Mark( TraceId.DownloadEnd, (int)window.Position, Trace.Now - requestStart );
 					return (null, 0, (int)window.Position);
 				}
 				else
@@ -316,6 +319,7 @@ public sealed class RemoteFile
 					{
 						var data = await response.Content.ReadAsByteArrayAsync( ct );
 						var total = TotalSize( response, status );
+						if ( Trace.On ) Trace.Mark( TraceId.DownloadEnd, data.Length, Trace.Now - requestStart );
 
 						// A server that ignores Range sends the whole file
 						var offset = 0;

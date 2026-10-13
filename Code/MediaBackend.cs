@@ -473,7 +473,8 @@ public sealed class MediaBackend : IDisposable
 		if ( video is not null )
 		{
 			var presentStart = System.Diagnostics.Stopwatch.GetTimestamp();
-			video.Present();
+			using ( Trace.Begin( TraceId.PresentBegin, TraceId.PresentEnd, null, -1 ) )
+				video.Present();
 			MediaProbe.PresentTook( System.Diagnostics.Stopwatch.GetElapsedTime( presentStart ).TotalMilliseconds, "direct", 0 );
 		}
 

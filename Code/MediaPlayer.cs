@@ -383,12 +383,15 @@ public sealed class MediaPlayer : Component
 
 	protected override void OnUpdate()
 	{
+		Trace.Frame();
+
 		if ( IsAuthority )
 			UpdateAuthority();
 
 		if ( !Application.IsDedicatedServer )
 		{
-			UpdatePlayback();
+			using ( Trace.Begin( TraceId.UpdatePlaybackBegin, TraceId.UpdatePlaybackEnd ) )
+				UpdatePlayback();
 			UpdateCaptions();
 			RecentLinks.Saw( this );
 		}

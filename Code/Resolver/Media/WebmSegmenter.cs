@@ -326,6 +326,8 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		var aStart = audio.ClusterStart( ai );
 		var aEnd = aj < audio.Cues.Count ? audio.ClusterStart( aj ) : audio.SegmentEnd;
 
+		var downloadStart = Trace.On ? Trace.Now : 0;
+		Trace.Mark( TraceId.DownloadBegin, seq );
 		var videoTask = video.File.ReadPooledAsync( vStart, vEnd, ct );
 		var audioTask = audio.File.ReadPooledAsync( aStart, aEnd, ct );
 
@@ -333,6 +335,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 
 		// The downloads sit in pooled buffers (see PooledRange): they go back in the finally, once the mux has written
 		// the file - the video blocks are slices of the buffer until then - or on any failure, a cancelled build included.
+		Trace.WorkerEnter();
 		try
 		{
 			// A mass refusal (403) fails both downloads at once: awaiting them one by one orphaned the second task,
@@ -351,6 +354,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 			var videoLength = videoTask.Result.Length;
 			var audioBytes = audioTask.Result.Data;
 			var audioLength = audioTask.Result.Length;
+			if ( Trace.On ) Trace.Mark( TraceId.DownloadEnd, videoLength + audioLength, Trace.Now - downloadStart );
 			MediaProbe.Note( $"seg {seq}: downloaded {(videoLength + audioLength) / 1048576.0:0} MB" );
 
 			// Parsing the audio and assembling the entries copies megabytes of clusters - done on a worker thread with
@@ -363,6 +367,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 
 			await GameTask.RunInThreadAsync( () =>
 			{
+				var mux = Trace.Begin( TraceId.MuxBegin, TraceId.MuxEnd, "bimp.mux", seq );
 				var blocks = WebmMux.ParseBlocks( audioBytes, 0, audioLength );
 				if ( blocks.Count > 0 ) firstBlockTime = blocks[0].Time;
 
@@ -407,6 +412,9 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 				}
 
 				var tracks = Ebml.Make( Ebml.Tracks, Ebml.Concat( video.TrackEntry, WebmMux.FixMonoOpus( WebmMux.RenumberTrack( audio.TrackEntry, atrack, 0x6A696D6200000000UL | atrack ) ) ) );
+				mux.Dispose();
+
+				using var write = Trace.Begin( TraceId.WriteBegin, TraceId.WriteEnd, null, videoLength + audioLength );
 				using var file = FileSystem.Data.OpenWrite( path );
 				WebmMux.Write( file, video.EbmlHeader, video.TimecodeScale, duration, tracks, vtrack, entries, pre );
 			} );
@@ -425,6 +433,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		}
 		finally
 		{
+			Trace.WorkerExit();
 			ReturnBuffer( videoTask );
 			ReturnBuffer( audioTask );
 		}
@@ -433,6 +442,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 	/// <summary> Give a download's buffer back, whether the build is done with it or never got that far (see <see cref="PooledRange"/>). </summary>
 	static void ReturnBuffer( Task<PooledRange> download )
 	{
+		Trace.Mark( TraceId.ReturnBuffer );
 		if ( download.IsCompletedSuccessfully ) download.Result.Dispose();
 		else if ( !download.IsCompleted ) download.ContinueWith( t => { if ( t.IsCompletedSuccessfully ) t.Result.Dispose(); } ); // still running: its owner is nobody now
 	}
@@ -452,6 +462,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 
 		await GameTask.RunInThreadAsync( () =>
 		{
+			var mux = Trace.Begin( TraceId.MuxBegin, TraceId.MuxEnd, "bimp.mux" );
 			var blocks = WebmMux.ParseBlocks( data.Data, 0, data.Length );
 			if ( blocks.Count == 0 ) throw new MergeException( "no audio blocks" );
 			firstTime = blocks[0].Time;
@@ -461,6 +472,9 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 				.ToList();
 
 			var tracks = Ebml.Make( Ebml.Tracks, WebmMux.FixMonoOpus( audio.TrackEntry ) );
+			mux.Dispose();
+
+			using var write = Trace.Begin( TraceId.WriteBegin, TraceId.WriteEnd, null, data.Length );
 			using var file = FileSystem.Data.OpenWrite( path );
 			WebmMux.Write( file, audio.EbmlHeader, audio.TimecodeScale, duration, tracks, track, entries, null );
 		} );
@@ -487,6 +501,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 
 	static void Delete( string path )
 	{
+		Trace.Mark( TraceId.FileDelete );
 		try
 		{
 			if ( FileSystem.Data.FileExists( path ) ) FileSystem.Data.DeleteFile( path );

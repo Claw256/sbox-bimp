@@ -219,6 +219,7 @@ public sealed class SegmentPlayer : IDisposable
 
 		var p = current.Player;
 		var seg = current.Segment;
+		if ( Trace.On && p is not null ) Trace.Mark( TraceId.PlaybackTime, seg.Seq, (long)(p.PlaybackTime * 1000) );
 
 		// A player started fresh delivers its first frame ~0.25s after Play(), and one that was paused takes ~1s
 		// after Resume() - so start the next segment just in time (hidden, silent, presented so it runs),
@@ -267,6 +268,7 @@ public sealed class SegmentPlayer : IDisposable
 			if ( ClockLeadOnly ) clockLead = Math.Clamp( clockLead - ahead * 0.7f, 0.0f, 1.0f );
 			else if ( !JustInTime ) leadCorrection = Math.Clamp( leadCorrection - ahead * 0.7f, -0.2f, 0.2f );
 			MediaProbe.Note( $"swap {seg.Seq}->{next.Segment.Seq} at {p?.PlaybackTime:0.000}/{seg.End:0.000} (overlap {seg.Overlap * 1000:0}ms), next ahead by {ahead * 1000:0}ms, lead now {StartLead * 1000:0}ms" );
+			Trace.Mark( TraceId.SegSwap, next.Segment.Seq );
 			next.Preload = false;
 			ApplyAudio( next );
 
@@ -292,7 +294,8 @@ public sealed class SegmentPlayer : IDisposable
 	{
 		if ( slot?.Player is null ) return;
 		var t = System.Diagnostics.Stopwatch.GetTimestamp();
-		slot.Player.Present();
+		using ( Trace.Begin( TraceId.PresentBegin, TraceId.PresentEnd, null, slot.Segment.Seq ) )
+			slot.Player.Present();
 		MediaProbe.PresentTook( System.Diagnostics.Stopwatch.GetElapsedTime( t ).TotalMilliseconds, role, slot.Segment.Seq );
 	}
 
@@ -320,6 +323,7 @@ public sealed class SegmentPlayer : IDisposable
 	Slot Open( MediaSegment segment, bool preload = false )
 	{
 		MediaProbe.Note( $"open seg {segment.Seq} ({segment.Start:0.00}-{segment.End:0.00}){(preload ? " (preload)" : "")}" );
+		Trace.Mark( TraceId.SegOpen, segment.Seq );
 		var slot = new Slot { Segment = segment, SinceOpened = 0, Preload = preload };
 		try
 		{
@@ -333,10 +337,12 @@ public sealed class SegmentPlayer : IDisposable
 			{
 				slot.Steady = slot.FirstFrame && slot.SinceFrame < SettleInterval ? slot.Steady + 1 : 0;
 				slot.SinceFrame = 0;
+				if ( !slot.FirstFrame ) Trace.Mark( TraceId.SegFirstFrame, segment.Seq );
 				slot.FirstFrame = true;
 			}, $"seg {segment.Seq}", holdWhileInactive: preload );
 			var playTimer = System.Diagnostics.Stopwatch.StartNew();
 			player.Play( FileSystem.Data, segment.Path );
+			Trace.Mark( TraceId.SegPlay, segment.Seq, playTimer.ElapsedTicks );
 			MediaProbe.Note( $"Play() seg {segment.Seq} took {playTimer.Elapsed.TotalMilliseconds:0.0}ms" );
 		}
 		catch ( Exception e )
@@ -349,6 +355,7 @@ public sealed class SegmentPlayer : IDisposable
 	void Close( Slot slot )
 	{
 		if ( slot?.Player is null ) return;
+		Trace.Mark( TraceId.SegClose, slot.Segment.Seq );
 		var timer = System.Diagnostics.Stopwatch.StartNew();
 		sink.Detach( slot.Player );
 		slot.Player.Dispose();

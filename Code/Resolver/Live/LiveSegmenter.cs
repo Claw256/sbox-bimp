@@ -517,8 +517,17 @@ public sealed class LiveSegmenter : ISegmentFeed, IDisposable
 		{
 			await GameTask.RunInThreadAsync( () =>
 			{
-				using var file = FileSystem.Data.OpenWrite( path );
-				Mp4Writer.Write( file, start, v, segFormat, a, segAac );
+				Trace.WorkerEnter();
+				try
+				{
+					using var write = Trace.Begin( TraceId.WriteBegin, TraceId.WriteEnd, null, seq );
+					using var file = FileSystem.Data.OpenWrite( path );
+					Mp4Writer.Write( file, start, v, segFormat, a, segAac );
+				}
+				finally
+				{
+					Trace.WorkerExit();
+				}
 			} );
 		}
 		catch ( Exception e )

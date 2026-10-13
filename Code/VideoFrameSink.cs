@@ -68,6 +68,7 @@ public sealed class VideoFrameSink : IDisposable
 				if ( leadingSkipped < MaxLeadingBlackFrames && IsBlack( span, w, h ) )
 				{
 					leadingSkipped++;
+					Trace.Mark( TraceId.TextureData, 3 );
 					return;
 				}
 				gotPicture = true;
@@ -78,11 +79,13 @@ public sealed class VideoFrameSink : IDisposable
 
 			if ( isActive is null || isActive() )
 			{
+				Trace.Mark( TraceId.TextureData, 1 );
 				Upload( span, w, h );
 				if ( keep is not null ) keep.Valid = false;
 				return;
 			}
 
+			Trace.Mark( TraceId.TextureData, 2 );
 			if ( keep is null || span.Length < w * h * 4 ) return;
 			if ( heldBuffer is null || heldBuffer.Length != w * h * 4 ) heldBuffer = new byte[w * h * 4];
 			keep.Data = heldBuffer;
@@ -137,7 +140,12 @@ public sealed class VideoFrameSink : IDisposable
 	{
 		if ( bitmap is null || !bitmap.IsValid ) return;
 		EnsureTexture( bitmap.Width, bitmap.Height );
-		if ( !MediaProbe.NoUpload ) texture.Update( bitmap );
+		if ( !MediaProbe.NoUpload )
+		{
+			using ( Trace.Begin( TraceId.UploadBegin, TraceId.UploadEnd, "bimp.upload", bitmap.Width * bitmap.Height * 4 ) )
+				texture.Update( bitmap );
+			Trace.Uploaded();
+		}
 		Frames++;
 		MediaProbe.DeliveredFrame();
 	}
@@ -169,7 +177,12 @@ public sealed class VideoFrameSink : IDisposable
 			Height = height;
 		}
 
-		if ( !MediaProbe.NoUpload ) texture.Update( data );
+		if ( !MediaProbe.NoUpload )
+		{
+			using ( Trace.Begin( TraceId.UploadBegin, TraceId.UploadEnd, "bimp.upload", width * height * 4 ) )
+				texture.Update( data );
+			Trace.Uploaded();
+		}
 		Frames++;
 		MediaProbe.DeliveredFrame( data, width, height );
 	}
