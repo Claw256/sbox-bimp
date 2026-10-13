@@ -66,8 +66,10 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 	const double VideoOverlapSeconds = 1.0;
 
 	/// <summary>
-	/// YouTube's AV1 urls stop answering after ~88 MB for the clients that get them (measured): plan the AV1 part of
-	/// playback to stay under this (counting what the session already downloaded), then carry on with the switch video.
+	/// YouTube's AV1 urls stop answering after ~88 MB for the clients that get them (documented, not measured here - no
+	/// measurement is recorded): plan the AV1 part of playback to stay under this (counting what the session already
+	/// downloaded), then carry on with the switch video. The switch video is FormatSelector.SwitchLike: the tallest SDR
+	/// VP9 below 4K at the same frame rate, as the engine's VP9 decoder keeps up with 1440p60 but not 4K60.
 	/// </summary>
 	const long Av1BudgetBytes = 80L * 1024 * 1024;
 

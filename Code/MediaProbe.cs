@@ -306,7 +306,7 @@ public static class MediaProbe
 	[ConCmd( "bimp_probe_texture", Help = "[probe] Play a FileSystem.Data video as an engine video texture drawn in the corner (for overlay_video 1); no argument stops it" )]
 	public static void TextureCmd( string path = null )
 	{
-		probeTexture = string.IsNullOrWhiteSpace( path ) ? null : Texture.Load( FileSystem.Data, path );
+		probeTexture = string.IsNullOrWhiteSpace( path ) ? null : Texture.LoadFromFileSystem( path, FileSystem.Data );
 		probeTextureScene = Game.ActiveScene;
 		Log.Info( $"[bimp probe] video texture {(probeTexture is null ? "stopped" : $"{path}: {probeTexture.Width}x{probeTexture.Height}")}" );
 	}

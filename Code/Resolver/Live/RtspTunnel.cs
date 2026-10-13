@@ -257,7 +257,7 @@ public sealed class RtspTunnel
 				var longPost = new StreamContent( upstream, 64 * 1024 );
 				longPost.Headers.ContentLength = UpstreamStream.DeclaredLength;
 				longPost.Headers.TryAddWithoutValidation( "Content-Type", "application/x-rtsp-tunnelled" );
-				_ = Post( longPost, ct );
+				Post( longPost, ct ).FireAndForget( "rtsp post" );
 			}
 			upstream.Send( padded );
 		}
@@ -265,7 +265,7 @@ public sealed class RtspTunnel
 		{
 			var content = new ByteArrayContent( base64 );
 			content.Headers.TryAddWithoutValidation( "Content-Type", "application/x-rtsp-tunnelled" );
-			_ = Post( content, postCts.Token );
+			Post( content, postCts.Token ).FireAndForget( "rtsp post" );
 		}
 
 		Response response;

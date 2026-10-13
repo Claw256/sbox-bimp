@@ -168,13 +168,6 @@ public static class Av1
 		return Ebml.Concat( head, s.Obu );
 	}
 
-	/// <summary> The sequence header OBU inside an av1C record (its config OBUs), null if it has none. </summary>
-	public static SequenceHeader FromConfigRecord( byte[] av1C )
-	{
-		if ( av1C is null || av1C.Length <= 4 ) return null;
-		return FindSequenceHeader( av1C[4..] );
-	}
-
 	/// <summary> AV1 spec 5.5, up to color_config - the rest (tools, film grain) isn't needed here. </summary>
 	public static SequenceHeader ParseSequenceHeader( ReadOnlySpan<byte> payload )
 	{

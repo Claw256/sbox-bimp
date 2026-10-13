@@ -259,8 +259,6 @@ public sealed class MediaPlayer : Component
 	/// </summary>
 	static BimpResolver Resolver => BimpResolver.Instance;
 
-	public Vector3 SoundPosition => SoundOrigin.IsValid() ? SoundOrigin.WorldPosition : WorldPosition;
-
 	BoxCollider soundBox;
 
 	/// <summary> The object the sound comes from: <see cref="SoundOrigin"/>, or this one. </summary>
@@ -820,7 +818,7 @@ public sealed class MediaPlayer : Component
 		var t = CurrentTime;
 		var url = LocalStreamUrl;
 
-		Backend = IsLive ? MediaBackend.CreateLive( url, Math.Clamp( MediaSettings.MaxVideoHeight, 144, 2160 ), AudioOnly )
+		Backend = IsLive ? MediaBackend.CreateLive( url, MediaSettings.ClampHeight( MediaSettings.MaxVideoHeight ), AudioOnly )
 			: PlayToken.IsToken( url ) ? MediaBackend.CreateNative( url, AudioOnly, SeekByReload && !IsLive ? t : 0 )
 			: MediaBackend.Create( url, AudioOnly, 0 );
 		sinceCorrection = 0;

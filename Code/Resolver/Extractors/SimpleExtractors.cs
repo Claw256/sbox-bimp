@@ -78,7 +78,7 @@ public abstract class SiteExtractor : IExtractor
 			return new StreamPlan { Kind = StreamKind.Direct, DirectUrl = best.Url };
 		}
 
-		var limit = request.Height > 0 ? request.Height : Math.Clamp( request.MaxHeight, 144, 2160 );
+		var limit = request.Height > 0 ? request.Height : MediaSettings.ClampHeight( request.MaxHeight );
 		var pick = m.Files.Where( f => f.Height <= limit ).OrderByDescending( f => f.Height ).ThenByDescending( f => f.Bitrate ).FirstOrDefault()
 			?? m.Files.OrderBy( f => f.Height ).FirstOrDefault()
 			?? throw new ResolveException( "No playable files found for that link." );

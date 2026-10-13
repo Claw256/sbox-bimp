@@ -106,7 +106,6 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			throw new ResolveException( "This YouTube stream hasn't started, or has only just ended." );
 
 		var formats = ParseFormats( player );
-		var thumbs = details?["thumbnail"]?["thumbnails"].Items().ToList();
 
 		// captions (and, when the first client doesn't list them, dubs) come from a client that lists them
 		var (captions, otherDubs) = await CaptionsAndDubs( id, ct );
@@ -120,7 +119,6 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			Title = details?["title"].Str() ?? id,
 			Duration = details?["lengthSeconds"].Long() ?? 0,
 			AudioOnly = audioOnly,
-			Thumbnail = thumbs?.LastOrDefault()?["url"].Str(),
 			Merged = true,
 			Qualities = audioOnly ? new List<int>() : FormatSelector.Qualities( formats ),
 			AudioTracks = dubs,
@@ -149,7 +147,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	{
 		try
 		{
-			var visitor = await VisitorData.GetAsync( ct );
+			var visitor = await VisitorData.GetAsync();
 			foreach ( var client in InnerTubeClients.Ordered( CaptionClients ) )
 			{
 				var player = await PostPlayer( client, id, visitor, ct );
@@ -179,7 +177,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	/// <summary> One caption track's file (json3 or timedtext XML), fetched the way this client gets its streams. Null if no client could. </summary>
 	public async Task<string> GetCaptionsAsync( string id, string trackId, CancellationToken ct )
 	{
-		var visitor = await VisitorData.GetAsync( ct );
+		var visitor = await VisitorData.GetAsync();
 		foreach ( var client in InnerTubeClients.Ordered( CaptionClients ) )
 		{
 			try
@@ -208,8 +206,6 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		var (player, plan, client) = await Player( id, ct, verifyDownload: true, request );
 		if ( plan.Kind == StreamKind.Live ) return plan;
 
-		// 4K above 30 fps is more than the engine's VP9 decoder keeps up with: play the AV1 copy if there's one, for as
-		// long as YouTube serves it (~88 MB), then carry on with VP9 1440p60 (see WebmSegmenter)
 		var formats = ParseFormats( player );
 
 		// [probe] bimp_yt_codec h264: the H.264/AAC formats through the DASH path
@@ -220,6 +216,8 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			return new StreamPlan { Kind = StreamKind.Hls, DirectUrl = manifest, ClientKey = client.Key };
 		}
 
+		// 4K above 30 fps is more than the engine's VP9 decoder keeps up with: play the AV1 copy if there's one, for as
+		// long as YouTube serves it (~88 MB), then carry on with VP9 1440p60 (see WebmSegmenter)
 		if ( MediaSettings.PreferAv1 && plan.Kind == StreamKind.Merge
 			&& formats.FirstOrDefault( f => f.Id == plan.Video.FormatId ) is { } vp9 && FormatSelector.TooHeavyForVp9( vp9 ) )
 		{
@@ -284,7 +282,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	/// </summary>
 	async Task<StreamFile> Av1Video( string id, MediaFormat like, string avoidClient, CancellationToken ct )
 	{
-		var visitor = await VisitorData.GetAsync( ct );
+		var visitor = await VisitorData.GetAsync();
 		foreach ( var client in InnerTubeClients.Ordered( Av1Clients ) )
 		{
 			// skip the client whose urls just refused, like the main chain does
@@ -318,7 +316,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	/// </summary>
 	async Task<(JsonNode player, StreamPlan plan, InnerTubeClient client)> Player( string id, CancellationToken ct, bool verifyDownload, StreamRequest request = null )
 	{
-		var visitor = await VisitorData.GetAsync( ct );
+		var visitor = await VisitorData.GetAsync();
 
 		// the most informative failure across clients: what YouTube said about the video beats a transport error or a refused url
 		string bestReason = null;
@@ -350,7 +348,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			{
 				Log.Trace( $"[bimp] youtube {id}: bot check, retrying with a fresh visitor id" );
 				VisitorData.Invalidate();
-				visitor = await VisitorData.GetAsync( ct );
+				visitor = await VisitorData.GetAsync();
 				bestReason = null;
 				bestRank = -1;
 			}
@@ -448,12 +446,12 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 	/// <summary> Log the formats each InnerTube client gets for a video, and whether its urls download. </summary>
 	[ConCmd( "bimp_yt_formats", Help = "Log the formats each YouTube client gets for a video id (and whether they download)" )]
-	public static void FormatsCmd( string id, string clients = "visionos,android_vr,ios,android" ) => _ = LogFormats( id, clients );
+	public static void FormatsCmd( string id, string clients = null ) => _ = LogFormats( id, clients );
 
 	static async Task LogFormats( string id, string clients )
 	{
-		var visitor = await VisitorData.GetAsync( CancellationToken.None );
-		foreach ( var client in InnerTubeClients.Ordered( clients ) )
+		var visitor = await VisitorData.GetAsync();
+		foreach ( var client in string.IsNullOrWhiteSpace( clients ) ? InnerTubeClients.All : InnerTubeClients.Ordered( clients ) )
 		{
 			try
 			{
@@ -505,7 +503,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 	static async Task LogCaptions( string id, string clients )
 	{
-		var visitor = await VisitorData.GetAsync( CancellationToken.None );
+		var visitor = await VisitorData.GetAsync();
 		var all = InnerTubeClients.All.Append( InnerTubeClients.Web ).ToList();
 		foreach ( var key in clients.Split( ',', StringSplitOptions.RemoveEmptyEntries ) )
 		{
@@ -541,7 +539,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		try
 		{
 			var client = InnerTubeClients.Ordered( clientKey )[0];
-			var player = await PostPlayer( client, id, await VisitorData.GetAsync( CancellationToken.None ), CancellationToken.None );
+			var player = await PostPlayer( client, id, await VisitorData.GetAsync(), CancellationToken.None );
 			var f = ParseFormats( player ).FirstOrDefault( x => x.Id == itag ) ?? throw new ResolveException( $"no itag {itag}" );
 			var timer = System.Diagnostics.Stopwatch.StartNew();
 			long from = fromMegabytes * 1048576L, to = from + megabytes * 1048576L, got = 0;
@@ -703,7 +701,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	async Task<JsonNode> PlaylistNext( string playlistId, string videoId, CancellationToken ct )
 	{
 		var client = InnerTubeClients.Web;
-		var visitor = await VisitorData.GetAsync( ct );
+		var visitor = await VisitorData.GetAsync();
 		var context = client.BuildContext();
 		if ( !string.IsNullOrEmpty( visitor ) ) context["client"]["visitorData"] = visitor;
 		var body = new JsonObject { ["context"] = context, ["playlistId"] = playlistId };
@@ -849,7 +847,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 		static readonly Regex Pattern = new( "\"VISITOR_DATA\":\"([^\"]+)\"", RegexOptions.Compiled );
 
-		public static Task<string> GetAsync( CancellationToken ct )
+		public static Task<string> GetAsync()
 		{
 			// a failed fetch (empty) is retried after a minute, not an hour
 			if ( value is not null && sinceFetched < (value.Length > 0 ? 3600 : 60) ) return Task.FromResult( value );

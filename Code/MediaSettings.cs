@@ -5,6 +5,12 @@ namespace Bimp;
 /// </summary>
 public static class MediaSettings
 {
+	/// <summary> Smallest and tallest video height anything is asked for (8K). </summary>
+	public const int MinSupportedHeight = 144;
+	public const int MaxSupportedHeight = 4320;
+
+	public static int ClampHeight( int height ) => Math.Clamp( height, MinSupportedHeight, MaxSupportedHeight );
+
 	/// <summary>
 	/// YouTube InnerTube clients to try, in order (see <see cref="Resolver.InnerTubeClients"/>). YouTube changes
 	/// which clients work now and then - this lets a server adjust without a code change.
@@ -38,7 +44,7 @@ public static class MediaSettings
 	/// AV1, and YouTube refuses their urls after ~88 MB (about a minute of 4K), so playback switches to VP9 1440p60 at a
 	/// keyframe before that (see WebmSegmenter).
 	/// </summary>
-	[ConVar( "bimp_av1", ConVarFlags.Saved, Help = "Play YouTube 4K60 as AV1 while YouTube serves it (~88 MB, about a minute), then VP9 1440p60 - 0 = VP9 4K60 throughout (19-45 fps)" )]
+	[ConVar( "bimp_av1", ConVarFlags.Saved, Help = "Play YouTube 4K60 as AV1 while YouTube serves it (about a minute), then VP9 1440p60 - 0 = VP9 4K60 throughout (19-45 fps)" )]
 	public static bool PreferAv1 { get; set; } = true;
 
 	/// <summary>
@@ -77,7 +83,7 @@ public static class MediaSettings
 	/// <summary>
 	/// Max video height clients stream. Lower is easier on bandwidth.
 	/// </summary>
-	[ConVar( "bimp_max_height", ConVarFlags.Replicated | ConVarFlags.Saved, Help = "Max video height streamed (e.g. 480, 720, 1080)" )]
+	[ConVar( "bimp_max_height", ConVarFlags.Replicated | ConVarFlags.Saved, Help = "Max video height streamed (e.g. 480, 720, 1080; up to 4320)" )]
 	public static int MaxVideoHeight { get; set; } = 720;
 
 	/// <summary>

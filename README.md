@@ -29,10 +29,10 @@ in sync. Everything runs inside the game: there's no server to host, no proxy an
   straight to the right spot.
 - **YouTube, Twitch, Kick, Vimeo, SoundCloud and more**, resolved inside the scene. Videos, shorts, playlists, live
   channels and VODs.
-- **Up to 4K60.** YouTube 4K60 plays as AV1 (the engine's smoothest decoder) for as long as YouTube serves it, then
-  carries on as VP9 1440p60.
-- **Your own quality and language.** Each player picks a resolution (144p–4K) and, for dubbed videos, an audio
-  language. Everyone stays on the same timeline.
+- **Up to 4K60, and 8K where VP9 has it.** YouTube 4K60 plays as AV1 (the engine's smoothest decoder) for as long as
+  YouTube serves it, then carries on as VP9 1440p60. 8K plays only where YouTube has a VP9 8K copy.
+- **Your own quality and language.** Each player picks a resolution (144p up to 4K60; the cap goes up to 8K, see
+  `bimp_max_height`) and, for dubbed videos, an audio language. Everyone stays on the same timeline.
 - **Captions** for YouTube videos that have them: pick a language (or off) in the remote, and the lines show on
   the screen.
 - **Live streams and cameras:** HLS, MPEG-TS, RTSP (over HTTP tunnelling) and Motion JPEG, with about a second of
@@ -52,7 +52,7 @@ in sync. Everything runs inside the game: there's no server to host, no proxy an
 | YouTube videos, shorts, `youtu.be`, YouTube Music | merged locally from YouTube's own files, VP9/AV1 + Opus. A start time in the link (`t=90`, `t=1m30s`) is honoured |
 | YouTube playlists (`/playlist?list=…`) | the first video plays and the rest are queued (up to the queue limit); a link to one video from an ordinary playlist plays just that video |
 | YouTube Mix / radio (`watch?v=…&list=RD…`) | that video plays and the mix is queued after it |
-| YouTube live, and a channel's live page (`/@channel/live`) | live, joined about 13 s behind the newest segment (YouTube's HLS has 5 s segments and no low latency parts) |
+| YouTube live, and a channel's live page (`/@channel/live`) | live, joined about 10 s behind the newest segment (YouTube's HLS has 5 s segments and no low latency parts) |
 | Twitch channels, VODs (`/videos/…`), clips | channels live, VODs seekable, clips as MP4 |
 | Kick channels and VODs | live, and seekable VODs |
 | Vimeo | MP4, or its HLS stream (seekable). DRM-protected videos are refused |
@@ -263,10 +263,10 @@ Console variables. "Client, saved" ones are each player's own and are remembered
 | `bimp_sub_lang` | client, saved | Your preferred caption language, e.g. `en`, `pt-BR`. Empty = the video's first written track. Auto-generated captions are used only for languages without a written track |
 | `bimp_ui_scale` | client, saved | Size of the remote (default `1.4`). It scales with the screen height; this multiplies that, never wider than 90% of the screen |
 | `bimp_av1` | client, saved | YouTube 4K60 as AV1 while YouTube serves it, then VP9 1440p60 (default `1`). `0` = VP9 4K60 throughout, which the engine plays at 19–45 fps |
-| `bimp_live_latency` | client, saved | Live latency: `low` (default, about one keyframe interval; HLS joins about 6–10 s behind the newest segment) or `normal` (a couple of segments behind, fewer decoder starts) |
+| `bimp_live_latency` | client, saved | Live latency: `low` (default, about one keyframe interval; HLS joins about 10 s behind the newest segment) or `normal` (a couple of segments behind, fewer decoder starts) |
 | `bimp_live_segment` | client, saved | `normal` latency only: minimum live segment length in seconds (default 4) |
-| `bimp_max_height` | server, replicated | The highest video height clients stream (default 720). Lower it for players on slow connections |
-| `bimp_yt_clients` | server, replicated | YouTube clients to try, in order (default `visionos,android_vr,ios`). Change it if YouTube stops serving one |
+| `bimp_max_height` | server, replicated | The highest video height clients stream (default 720, up to 4320). Lower it for players on slow connections. 4K60 is played as AV1 (see `bimp_av1`); 8K only plays where a VP9 8K copy exists |
+| `bimp_yt_clients` | server, replicated | YouTube clients to try, in order (default `visionos,android_vr,ios`; `android` is selectable but not in the default). Change it if YouTube stops serving one |
 | `bimp_debug` | client | Log what the screens think you're aiming at |
 
 ### Console commands
@@ -290,9 +290,10 @@ Console variables. "Client, saved" ones are each player's own and are remembered
   played, which happens when a URL expires or a client gets blocked. BIMP asks YouTube for a fresh URL first; if that
   is refused too, it re-resolves the video through a different YouTube client and carries on from where you were
   (twice at most per video). If all of that fails you get "Can't play this" with the reason.
-- **YouTube 4K60 is 4K only for its first ~20–40 s.** Only YouTube's Android clients get AV1, the one format the
-  engine plays smoothly at 4K60, and YouTube stops serving those URLs after ~88 MB. BIMP then switches to VP9 1440p60
-  at a keyframe. Replaying the same video within 10 minutes goes straight to 1440p.
+- **YouTube 4K60 is 4K only for about a minute.** Only YouTube's Android clients get AV1, the one format the
+  engine plays smoothly at 4K60, and YouTube is documented to stop serving those URLs after ~88 MB. BIMP then switches
+  to VP9 1440p60 at a keyframe. While the cached URLs aren't near expiry, replaying the same video within 10 minutes
+  goes straight to 1440p.
 - **Occasional small hitches** (a skipped frame or two) come from the engine, not BIMP: the same file played directly
   through one engine `VideoPlayer` hitches as much. A 720p source hitches least.
 - **Live H.264 can briefly break up** when a new segment's decoder starts. The log shows "H264: dropping pending sample

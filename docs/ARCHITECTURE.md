@@ -63,8 +63,9 @@ Extractors live in `Code/Resolver/Extractors/` and are registered in `Extractors
 
 - **YouTube** (`YouTubeExtractor`, `InnerTubeClients`): the InnerTube player API is called with clients whose formats
   come with plain URLs, so no signature deciphering is needed. The anonymous visitor ID from an embed page avoids the
-  "confirm you're not a bot" wall. Each client's URLs are checked with a 1-byte range request, and a client whose
-  downloads are refused (403) is skipped. The order is `bimp_yt_clients`. `FormatSelector` picks the formats.
+  "confirm you're not a bot" wall. Each client's URLs are checked with a 256 KB range request (`WebmSource.ProbeBytes`, as much as
+  the header read asks for) on both the video and the audio URL, one at a time, and a client whose downloads are
+  refused (403) is skipped. The order is `bimp_yt_clients`. `FormatSelector` picks the formats.
   `visionos` and `android_vr` list only a video's original audio: dubs are listed from the `ios` response (fetched for
   the captions anyway), and a client asking for a dub tries `ios` and `android` after the configured clients, keeping
   a plan without the dub only as the fallback. Channel live pages (`/@name/live`) are read for their canonical
@@ -123,17 +124,29 @@ range-downloads a few seconds at a time (`RemoteFile`) and writes standalone Web
 
 **YouTube 4K60.** The engine's VP9 decoder can't play 4K60 smoothly (19–45 fps), but its AV1 decoder plays it at a
 steady 60. Only YouTube's Android clients get AV1, and YouTube stops serving those URLs after ~88 MB. So bimp plays
-AV1 up to an 80 MB budget per session, then switches to VP9 1440p60 at the first VP9 keyframe after the last AV1
-segment (`plan.SwitchVideo`). A 403 on AV1 switches early. A 4K60 video with only HDR AV1 plays VP9 1440p60 from the
-start.
+AV1 up to an 80 MiB budget (`WebmSegmenter.Av1BudgetBytes`, counting what the session already downloaded), then
+switches to VP9 1440p60 at the first VP9 keyframe after the last AV1 segment (`plan.SwitchVideo`). A 403 on AV1
+switches early. A 4K60 video with only HDR AV1 plays VP9 1440p60 from the start.
+
+**Why the VP9 switch.** The engine's VP9 decoder can't hold 4K60 (documented 19-45 fps), and only the `android_vr` /
+`android` clients serve AV1 (`YouTubeExtractor.Av1Clients`). Those AV1 URLs are documented to stop after ~88 MB, so
+`PlanRanges` cuts the AV1 at the first segment that won't fit the budget and carries on from the VP9 keyframe
+(`FormatSelector.SwitchLike`: the tallest SDR VP9 below 4K at the same frame rate, normally 1440p60). The seam reuses
+the normal segment overlap and swap logic. **Unverified:** the 88 MB figure and the assumption that it is per URL (not
+per client or visitor) have no measurement recorded here; `bimp_yt_fetch <id> <itag> android_vr 100 0 1` re-checks it.
+`PlanRanges` runs once, when the segmenter is made, so a proactive URL refresh (below) resets `BytesRead` but does not
+re-plan the switch.
 
 ### Recovering from a refused stream
 
 YouTube can refuse a file's URL while it plays (it expired, or the client that minted it got blocked), and a resolve-time
-check can't catch that: a client's URLs can pass a 1 byte or 256 KB probe and still be refused once the real download
+check can't catch that: a client's URLs can pass a 256 KB probe and still be refused once the real download
 starts. So recovery has three layers:
 
-1. **Refresh the URL.** On a 403 or 410, `RemoteFile` calls its `Refresh`, which resolves the video again and picks the
+1. **Refresh the URL.** A URL whose `expire=` parameter is within 60 s (`RemoteFile.ExpiryMargin`) is replaced before
+   the request is made, through the same `Refresh` (with `refused=false`) and under the same limits as below (10 s
+   cooldown, at most 4 refreshes). A refresh resets `BytesRead`, the count of bytes taken from the URL. On a 403 or 410,
+   `RemoteFile` calls its `Refresh`, which resolves the video again and picks the
    same format id (only the same format fits the index already read). It does this at most 4 times, and not more often
    than every 10 s. A refresh that finds nothing, or hands back the same URL, makes the request fail at once with a
    `FetchException` that carries the status (`IsRefused`).
@@ -145,6 +158,9 @@ starts. So recovery has three layers:
    `MediaBackend.InvalidateSession()`, which makes `StreamSessions.Forget` drop the cached session and remember the
    avoided client for the session's lifetime, and reloads the backend the way a seek does: at the synced time, from a
    fresh resolve. At most twice per video; after that the error is shown as usual.
+
+A cached session whose URLs expire within 120 s (`StreamSessions.ExpiringSoon`, twice the margin; sessions under 30 s
+old are exempt in case the local clock is skewed) is resolved again instead of reused.
 
 Media requests can't claim the client's identity: the engine throws if code sets a `User-Agent` header, so the fix is to
 change client, not to disguise the request. Background work that nobody awaits (the next segment's build, captions,

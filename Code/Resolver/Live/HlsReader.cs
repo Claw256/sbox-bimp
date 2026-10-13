@@ -41,7 +41,7 @@ public sealed class HlsReader
 	/// </summary>
 	public static async Task<(bool live, double duration, int height)> ProbeAsync( Uri url, CancellationToken ct )
 	{
-		var reader = new HlsReader( url, null, 4320, null );
+		var reader = new HlsReader( url, null, MediaSettings.MaxSupportedHeight, null );
 		var (media, _) = await reader.ResolveVariant( url, ct );
 		var list = Parse( media, await reader.fetchText( media, ct ) );
 		var duration = list.Segments.Count > 0 ? list.Segments[^1].Start + list.Segments[^1].Duration : 0;

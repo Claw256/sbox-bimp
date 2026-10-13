@@ -26,7 +26,7 @@ UI, input and `VideoPlayer` behave.
 | `Code/ScrollingText.cs`, `InputGlyph.cs`, `PadNavigation.cs`, `MenuStyle.cs`, `SpectrumBars.cs`, `PanelFit.cs` | Shared UI pieces |
 | `Code/MediaInteract.cs`, `UseHandled.cs` | USE handling |
 | `Code/MediaSettings.cs` | Console variables |
-| `Code/MediaProbe.cs`, `LatencyLab.cs` | Diagnostic console commands |
+| `Code/MediaProbe.cs`, `LatencyLab.cs`, `Code/Resolver/Extractors/YouTubeExtractor.cs` | Diagnostic console commands (`bimp_yt_*` live in the extractor; `bimp_yt_codec` in `MediaSettings.cs`) |
 | `Code/Resolver/` | Link resolving: `BimpResolver` (host), `PlayToken` (per-client sessions), `FormatSelector` |
 | `Code/Resolver/Extractors/` | One extractor per site (YouTube, Twitch, Kick, Vimeo, SoundCloud, HLS...) |
 | `Code/Resolver/Media/` | WebM/MP4 parsing and writing, range downloads, the YouTube segmenter |
@@ -77,6 +77,11 @@ Console commands (type them in the editor console, or send them through the edit
 | `bimp_probe_file <path> [native\|once]` | Play a `FileSystem.Data` file directly, bypassing BIMP's pipeline |
 | `bimp_fetch <url> [follow]` | GET a url through `Sandbox.Http` and print what came back |
 | `bimp_yt_formats <id>` | The formats each YouTube client gets, and whether they download |
+| `bimp_yt_live <id>` | What a YouTube live stream's HLS manifest offers (variants, segment length, low latency tags) |
+| `bimp_yt_captions <id> [clients]` | The caption tracks each YouTube client lists, and whether the first one downloads |
+| `bimp_probe_texture [path]` | Play a `FileSystem.Data` video as an engine video texture in the corner (for `overlay_video 1`); no argument stops it |
+| `bimp_probe_noupload <0\|1>` | Skip the frame sink's texture upload (frames still counted), to separate the upload's cost |
+| `bimp_yt_codec h264` | Play YouTube from its H.264/AAC formats (up to 1080p60) instead of VP9/AV1; empty = default |
 | `bimp_yt_fetch …`, `bimp_lab_*`, `bimp_probe_garbage` | Lower-level experiments (see their help text) |
 
 Tips:

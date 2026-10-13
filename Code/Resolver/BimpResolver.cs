@@ -66,7 +66,7 @@ public sealed class BimpResolver
 
 		var info = await GetInfoAsync( extractor, uri, audioOnly );
 		var audio = audioOnly || info.AudioOnly;
-		var maxh = Math.Clamp( MediaSettings.MaxVideoHeight, 144, 2160 );
+		var maxh = MediaSettings.ClampHeight( MediaSettings.MaxVideoHeight );
 
 		return new MediaQueueItem
 		{

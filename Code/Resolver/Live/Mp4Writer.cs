@@ -63,7 +63,6 @@ public sealed class AacConfig
 
 	static readonly int[] Rates = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350 };
 
-	public static int RateIndex( int rate ) => Array.IndexOf( Rates, rate );
 	public static int RateOf( int index ) => index >= 0 && index < Rates.Length ? Rates[index] : 0;
 
 	/// <summary> Build from ADTS header fields. </summary>

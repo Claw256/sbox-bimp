@@ -81,7 +81,8 @@ public static class FormatSelector
 
 	/// <summary>
 	/// What a 4K60 AV1 choice carries on with once YouTube stops serving it: the tallest SDR VP9 below 4K at the same
-	/// frame rate (1440p60 - the engine's VP9 decoder keeps up with that).
+	/// frame rate (1440p60 - the engine's VP9 decoder keeps up with that, but not with 4K60). The switch happens because
+	/// the AV1 urls from the android clients are documented to stop after ~88 MB (unverified, no measurement recorded).
 	/// </summary>
 	public static MediaFormat SwitchLike( IEnumerable<MediaFormat> formats, MediaFormat like )
 		=> WebmVideo( formats ).Where( f => !f.Hdr && f.Height < 2160 && MathF.Abs( f.Fps - like.Fps ) < 1 && f.VideoCodec is { } v && !v.StartsWith( "av01" ) )
@@ -159,7 +160,7 @@ public static class FormatSelector
 
 	public static StreamPlan Plan( IReadOnlyList<MediaFormat> formats, StreamRequest request )
 	{
-		var maxh = Math.Clamp( request.MaxHeight, 144, 2160 );
+		var maxh = MediaSettings.ClampHeight( request.MaxHeight );
 		var audio = PickAudio( WebmAudio( formats ), request.Language ).OrderByDescending( f => f.Bitrate ).ToList();
 
 		if ( request.AudioOnly )

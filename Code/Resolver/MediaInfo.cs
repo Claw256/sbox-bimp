@@ -28,7 +28,6 @@ public sealed class MediaInfo
 	public float Duration { get; set; }
 
 	public bool AudioOnly { get; set; }
-	public string Thumbnail { get; set; }
 
 	/// <summary> The stream is merged into local files by each client - it seeks by reopening at a time. </summary>
 	public bool Merged { get; set; }
