@@ -1,7 +1,6 @@
 # Finding the cause of a hitch
 
-How to work out *why* video stutters or audio glitches, from bimp's code down through the engine. Nothing here is
-built yet except what is marked "exists": it is the result of an investigation, so the next session can start from it.
+How to work out *why* video stutters or audio glitches, from bimp's code down through the engine. The in-process timeline and hitch detector described below now exist (`Code/Trace.cs`); the OS-level tools are still manual.
 
 ## What we know
 
@@ -50,7 +49,7 @@ that blocks is native. The renderer is **Vulkan** (`rendersystemvulkan.dll`: `vk
 `vkQueuePresentKHR`), so D3D/DXGI-based tools describe presentation only partly. A 4K frame is about 33 MB through
 `Texture.Update` (2 GB/s at 60 fps); 1440p is 14.7 MB.
 
-## Plan: one timeline for everything we can see (not built)
+## The timeline and hitch detector (exists: `Code/Trace.cs`)
 
 **Event ring.** A static array of 65,536 24-byte structs (`long Ticks` from `Stopwatch.GetTimestamp`, `int Id`,
 `int Arg`, `long Value`), written lock-free (`Interlocked.Increment` on a head index) from any thread, behind a
@@ -80,6 +79,65 @@ gap -> `TEX-UPLOAD`; `Present` long with no `OnTextureData` inside -> `DECODER-L
 **Also:** wrap the upload and the mux in `Performance.Scope`, turn on `GpuProfilerStats` and log its GPU frame time
 and VRAM, and keep `bimp_probe_noupload` and `bimp_probe_file` (plays a file through a sink, with no segmenter or
 workers) as controls.
+
+**Using it.** `bimp_trace 1` turns it on (and the engine GPU profiler), `bimp_trace_hitch <ms>` sets the threshold (default 50),
+`bimp_trace_summary` prints and resets the verdict counts, `bimp_trace_dump NAME` writes `lab/trace_NAME.csv` (the last 65,536
+events: ms, thread, event, arg, value). Hooks: `MediaPlayer.OnUpdate`, `VideoFrameSink` (`OnTextureData`, `Texture.Update`,
+scope `bimp.upload`), `SegmentPlayer` (Present, Open, Play, FirstFrame, Swap, Close, PlaybackTime), `MediaBackend`,
+`WebmSegmenter` (download, mux with scope `bimp.mux`, write, buffer return, delete), `RemoteFile` requests, `LiveSegmenter`
+writes. Two kinds of hitch are detected: a long main-thread frame, and a long gap between pictures reaching the screen
+(the gap is taken at 40 ms or the threshold, whichever is lower). Known limits: with `bimp_probe_noupload 1` the
+picture-gap detector is blind (no uploads happen); `GpuProfilerStats.VideoMemory*` read 0/0 here; a mux span that throws
+isn't closed; `Present` is measured on the main thread, so the decoder's own threads are still invisible.
+
+## Results so far (measured, 2026-10-13)
+
+Setup: `kKLSuRrZwwE`, quality 4320 (plays the 1440p60 VP9 copy), `bimp_trace 1`, `bimp_probe pace`. Three live runs
+(50 s, 60 s, 60 s, the last with `bimp_probe_noupload 1`). **No 100-250 ms burst happened in any of them**, so the
+original problem was not reproduced; the worst stall was 81 ms.
+
+| Run | Pictures/s | Longest picture gap | Longest frame | Detector verdicts |
+|---|---|---|---|---|
+| 1 (50 s) | 59.5 | 67 ms | 32 ms | 4x UNKNOWN (before the classifier fix, see below) |
+| 2 (60 s) | 59.8 | 81 ms | 69 ms | 5x DECODER-LATE, 1x UNKNOWN |
+| 3 (60 s, no upload) | 59.6 | 63 ms | 51 ms | 1x DECODER-LATE, 1x UNKNOWN |
+
+(Between runs 1 and 2 the classifier was changed: a picture gap where the main thread was normal and the only
+callback was the one that ended the gap was reported UNKNOWN and is now DECODER-LATE. Two further hitches in the gap
+between runs, labelled 1x WORKER-CONTENTION and 1x DECODER-LATE, are not in the table.)
+
+What the data says:
+
+- GC was never the cause: 0 gen2, longest pause 13 ms, `GcPause` 0 in every verdict line.
+- `Texture.Update` was never long: 0.6-0.7 ms in every verdict line (1440p, 14.7 MB). The run with the upload skipped
+  still had a 63 ms picture gap and a 51 ms frame, so **the upload isn't needed for a stall**; the earlier "noupload was
+  clean" run was luck of an intermittent problem. The upload lead is not supported by these runs.
+- Most picture gaps (41-67 ms, 2-4 missed pictures) happened with the main thread running at 8.3 ms, short bimp spans, no
+  worker active, and one callback in the gap: the decoder delivered late and nothing in bimp explains it (inferred: a
+  native decoder thread, the engine or the OS; not proven).
+- Long main-thread frames (69-95 ms) were seen three times: once with a mux + write + download running together
+  (`workers=1`; the only sample that points at worker contention), once with all bimp spans at ~2.5 ms and GPU time
+  1.8 ms (engine, render thread or OS; nothing of ours), and once together with `Present()` taking 10-15 ms (the
+  decoder's delivery inside `Present`).
+- Segment swaps and opens were not near any hitch (`segment events 0` in every verdict).
+
+Not done yet: the `bimp_probe_file` control, an elevated WPR/Nsight capture, and enough runs to catch a real
+100-250 ms burst. Until a burst is captured, nothing here says what causes it, only what it isn't (GC, the upload call,
+segment swaps).
+
+### Commands to paste into an admin terminal during a burst
+
+```
+wpr -start CPU -start DotNET -start Audio -start Video -start GPU -filemode
+:: reproduce the burst, then within ~20 s:
+wpr -stop C:\Users\Rexami\bimp_hitch.etl "bimp stutter"
+:: only if a capture is left running:
+wpr -cancel
+"C:\Program Files\NVIDIA Corporation\FrameViewSDK\bin\PresentMon_x64.exe" --process_name sbox-dev.exe --timed 30 --output_file C:\Users\Rexami\bimp_presentmon.csv
+"C:\Program Files\NVIDIA Corporation\Nsight Systems 2025.5.2\target-windows-x64\nsys.exe" profile --help
+```
+
+The Nsight line lists the flags first, since it may not attach to a running editor.
 
 ## Hypotheses and what each looks like on the timeline
 
