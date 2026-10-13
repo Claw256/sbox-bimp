@@ -1,8 +1,61 @@
+using System.Buffers;
 using System.Globalization;
 using System.Net.Http;
 using System.Threading;
 
 namespace Bimp.Resolver.Media;
+
+/// <summary>
+/// A downloaded range held in a buffer rented from the shared array pool (a 44 s segment's video is 50-66 MB: a fresh
+/// array of that size per segment is all large-object-heap garbage). <b>Dispose it</b> to give the buffer back - nothing
+/// may touch <see cref="Data"/> afterwards, so whoever reads it (the mux, on a worker thread) must be finished first.
+/// <para>
+/// The pool may hand out a larger array than asked for: only <see cref="Length"/> bytes of <see cref="Data"/> are the
+/// range - never use <c>Data.Length</c>.
+/// </para>
+/// </summary>
+public sealed class PooledRange : IDisposable
+{
+	/// <summary> How many bytes past the range are filled with 0xFF (see the constructor). </summary>
+	const int TailGuard = 16;
+
+	/// <summary> The range is the first <see cref="Length"/> bytes; the rest is whatever the buffer held before. </summary>
+	public byte[] Data { get; private set; }
+
+	/// <summary> The size of the range. </summary>
+	public int Length { get; }
+
+	bool pooled;
+
+	internal PooledRange( int length )
+	{
+		Length = length;
+		if ( length <= 0 )
+		{
+			Data = Array.Empty<byte>();
+			return;
+		}
+
+		Data = ArrayPool<byte>.Shared.Rent( length );
+		pooled = true;
+
+		// The parsers stop quietly at an element header that the buffer cuts off, but an oversized buffer would hand them
+		// the stale bytes after the range instead (zeros or an old segment) - 0xFF decodes as an unknown-size element
+		// that ends the walk, the same as a cut off one.
+		var guard = Math.Min( TailGuard, Data.Length - length );
+		for ( int i = 0; i < guard; i++ ) Data[length + i] = 0xFF;
+	}
+
+	public void Dispose()
+	{
+		if ( !pooled ) return;
+		pooled = false;
+
+		var data = Data;
+		Data = Array.Empty<byte>();
+		ArrayPool<byte>.Shared.Return( data );
+	}
+}
 
 public class FetchException : Exception
 {
@@ -132,6 +185,37 @@ public sealed class RemoteFile
 	}
 
 	/// <summary>
+	/// Bytes [start, end) of the file, in a pooled buffer instead of a new array - and each chunk goes from the response
+	/// straight into it, with no 8 MiB array of its own. The caller owns the result and must dispose it (on this method's
+	/// failure it already has).
+	/// </summary>
+	public async Task<PooledRange> ReadPooledAsync( long start, long end, CancellationToken ct )
+	{
+		if ( Size > 0 ) end = Math.Min( end, Size );
+		if ( end <= start ) return new PooledRange( 0 );
+
+		var range = new PooledRange( checked((int)(end - start)) );
+		try
+		{
+			var pos = start;
+			while ( pos < end )
+			{
+				var want = (int)Math.Min( ChunkSize, end - pos );
+				var (_, _, n) = await RequestAsync( pos, want, range.Data, (int)(pos - start), ct );
+				if ( n == 0 ) throw new FetchException( "the server returned no data" );
+				System.Threading.Interlocked.Add( ref bytesRead, n );
+				pos += n;
+			}
+			return range;
+		}
+		catch
+		{
+			range.Dispose();
+			throw;
+		}
+	}
+
+	/// <summary>
 	/// Download the whole file into <paramref name="output"/>, chunk by chunk. <paramref name="patch"/> may modify
 	/// each chunk before it's written (given the chunk's offset in the file).
 	/// </summary>
@@ -153,6 +237,20 @@ public sealed class RemoteFile
 
 	async Task<(byte[] data, long total)> RequestAsync( long start, int count, CancellationToken ct )
 	{
+		var (data, total, _) = await RequestAsync( start, count, null, 0, ct );
+		return (data, total);
+	}
+
+	/// <summary>
+	/// One range request, with the retry and refresh handling. Without <paramref name="into"/> the bytes come back as a new
+	/// array. With it they are written to into[intoOffset..intoOffset + count) (data is null, copied says how many) - read
+	/// from the response as it arrives, nothing buffered whole in between.
+	/// </summary>
+	async Task<(byte[] data, long total, int copied)> RequestAsync( long start, int count, byte[] into, int intoOffset, CancellationToken ct )
+	{
+		// into: a response that doesn't fit the window (see below) is read the buffered way, which can trim it
+		var buffered = into is null;
+
 		for ( int attempt = 0; ; attempt++ )
 		{
 			ct.ThrowIfCancellationRequested();
@@ -188,6 +286,27 @@ public sealed class RemoteFile
 				// [probe] bimp_probe_refuse: answer 403 without asking the server, so the refresh and the
 				// session re-resolve can be exercised on demand
 				if ( poisoned ) status = 403;
+				else if ( !buffered )
+				{
+					// the body is copied from the response into the caller's buffer as it arrives. An error status throws, so
+					// the window is exactly the bytes asked for: a body that outgrows it is a server that ignored the range
+					// (it sent the whole file) or over-delivered
+					using var body = await Http.RequestStreamAsync( Url, headers: headers, cancellationToken: ct );
+					using var window = new System.IO.MemoryStream( into, intoOffset, count, true );
+					try
+					{
+						await body.CopyToAsync( window, 81920, ct );
+					}
+					catch ( NotSupportedException )
+					{
+						Log.Trace( "[bimp] the server sent more than the byte range, trimming it" );
+						buffered = true;
+						attempt--; // not a failed attempt
+						continue;
+					}
+
+					return (null, 0, (int)window.Position);
+				}
 				else
 				{
 					using var response = await Http.RequestAsync( Url, headers: headers, cancellationToken: ct );
@@ -199,17 +318,27 @@ public sealed class RemoteFile
 						var total = TotalSize( response, status );
 
 						// A server that ignores Range sends the whole file
+						var offset = 0;
+						var length = data.Length;
 						if ( status == 200 && start > 0 )
 						{
 							if ( data.Length <= start ) throw new FetchException( "the server ignored the byte range" );
-							data = data.AsSpan( (int)start, (int)Math.Min( count, data.Length - start ) ).ToArray();
+							offset = (int)start;
+							length = (int)Math.Min( count, data.Length - start );
 						}
-						else if ( data.Length > count )
+						else if ( length > count )
 						{
-							data = data.AsSpan( 0, count ).ToArray();
+							length = count;
 						}
 
-						return (data, total);
+						if ( into is not null )
+						{
+							Buffer.BlockCopy( data, offset, into, intoOffset, length );
+							return (null, total, length);
+						}
+
+						if ( length != data.Length ) data = data.AsSpan( offset, length ).ToArray();
+						return (data, total, length);
 					}
 				}
 			}
@@ -220,6 +349,11 @@ public sealed class RemoteFile
 			catch ( FetchException )
 			{
 				throw;
+			}
+			catch ( HttpRequestException e ) when ( e.StatusCode is not null )
+			{
+				// the streamed request throws on an error status: carry on with it like any other response's
+				status = (int)e.StatusCode.Value;
 			}
 			catch ( Exception e ) when ( attempt < Retries )
 			{

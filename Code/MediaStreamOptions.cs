@@ -33,12 +33,20 @@ public static class MediaStreamOptions
 	public static IReadOnlyList<int> ParseQualities( string value )
 	{
 		if ( string.IsNullOrWhiteSpace( value ) ) return Array.Empty<int>();
+		if ( value == cachedQualitiesValue ) return cachedQualities;
 
-		return value.Split( ',', StringSplitOptions.RemoveEmptyEntries )
+		var parsed = value.Split( ',', StringSplitOptions.RemoveEmptyEntries )
 			.Select( s => int.TryParse( s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var h ) ? h : 0 )
 			.Where( h => h > 0 )
 			.ToList();
+
+		cachedQualities = parsed;
+		cachedQualitiesValue = value;
+		return parsed;
 	}
+
+	static string cachedQualitiesValue;
+	static IReadOnlyList<int> cachedQualities = Array.Empty<int>();
 
 	public static string EncodeAudioTracks( IEnumerable<MediaAudioTrack> tracks )
 	{

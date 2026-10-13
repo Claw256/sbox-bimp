@@ -123,6 +123,75 @@ public static class MediaProbe
 		lastTexHash = h;
 	}
 
+	static string dumpName;
+	static float dumpAt, dumpInterval;
+	static int dumpCount, dumpIndex;
+
+	/// <summary>
+	/// [probe] Save the first frame delivered once the first player's time reaches <paramref name="seconds"/> as
+	/// <c>lab/dump_NAME.png</c> in FileSystem.Data, exactly as the engine decoded it (to compare an HDR stream's frames
+	/// with the SDR copy of the same moment). With <paramref name="count"/> above 1 it saves one every
+	/// <paramref name="interval"/> seconds as <c>lab/dump_NAME_00.png</c>, <c>_01</c>...
+	/// </summary>
+	[ConCmd( "bimp_probe_dump", Help = "[probe] Save video frames as lab/dump_NAME[_NN].png, as the engine decoded them: name [media seconds] [count] [interval seconds]" )]
+	public static void DumpCmd( string name, float seconds = 0, int count = 1, float interval = 1 )
+	{
+		dumpName = name;
+		dumpAt = seconds;
+		dumpCount = Math.Max( 1, count );
+		dumpInterval = Math.Max( 0.1f, interval );
+		dumpIndex = 0;
+		Log.Info( $"[bimp probe] dumping {dumpCount} frame(s) from {seconds:0.0}s every {dumpInterval:0.0}s as lab/dump_{name}.png" );
+	}
+
+	static void DumpFrame( ReadOnlySpan<byte> rgba, int width, int height )
+	{
+		var player = Game.ActiveScene?.GetAllComponents<MediaPlayer>().FirstOrDefault();
+		// only within two seconds of the asked time: the player may still be on whatever it played before
+		if ( player is null || player.CurrentTime < dumpAt || player.CurrentTime > dumpAt + Math.Max( 2, dumpInterval ) || rgba.Length < width * height * 4 ) return;
+
+		var name = dumpCount > 1 ? $"{dumpName}_{dumpIndex:00}" : dumpName;
+		if ( ++dumpIndex >= dumpCount ) dumpName = null;
+		else dumpAt += dumpInterval;
+		try
+		{
+			// box averaged to 192x108: a different resolution per stream, and a colour comparison doesn't need more
+			const int outW = 192, outH = 108;
+			var bitmap = new Bitmap( outW, outH );
+			for ( int oy = 0; oy < outH; oy++ )
+			{
+				int y0 = oy * height / outH, y1 = Math.Max( y0 + 1, (oy + 1) * height / outH );
+				for ( int ox = 0; ox < outW; ox++ )
+				{
+					int x0 = ox * width / outW, x1 = Math.Max( x0 + 1, (ox + 1) * width / outW );
+					long r = 0, g = 0, b = 0;
+					for ( int y = y0; y < y1; y++ )
+					{
+						var row = y * width * 4;
+						for ( int x = x0; x < x1; x++ )
+						{
+							var i = row + x * 4;
+							r += rgba[i];
+							g += rgba[i + 1];
+							b += rgba[i + 2];
+						}
+					}
+
+					var n = (y1 - y0) * (x1 - x0) * 255.0f;
+					bitmap.SetPixel( ox, oy, new Color( r / n, g / n, b / n, 1.0f ) );
+				}
+			}
+
+			FileSystem.Data.CreateDirectory( "lab" );
+			FileSystem.Data.WriteAllBytes( $"lab/dump_{name}.png", bitmap.ToPng() );
+			Log.Info( $"[bimp probe] saved lab/dump_{name}.png ({width}x{height} -> {outW}x{outH}) at {player.CurrentTime:0.00}s" );
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( $"[bimp probe] couldn't save the frame: {e.Message}" );
+		}
+	}
+
 	static int deliveredFrames, deliveredRepeats;
 	static readonly List<(double time, double brightness)> blackFrames = new();
 	static readonly List<double> uploadTimes = new();
@@ -131,6 +200,7 @@ public static class MediaProbe
 	/// <summary> The frame just uploaded by a <see cref="VideoFrameSink"/>: during the "tex" probe, note whether its centre patch repeats the last one's (repeats in the content itself aren't stutter). </summary>
 	internal static void DeliveredFrame( ReadOnlySpan<byte> rgba, int width, int height )
 	{
+		if ( dumpName is not null ) DumpFrame( rgba, width, height );
 		if ( !texProbe || width < 96 || height < 96 ) return;
 		// a sparse sample of the whole frame (every 7th pixel of every 7th row)
 		ulong h = 1469598103934665603UL;

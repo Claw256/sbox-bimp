@@ -82,6 +82,8 @@ Console commands (type them in the editor console, or send them through the edit
 | `bimp_probe_texture [path]` | Play a `FileSystem.Data` video as an engine video texture in the corner (for `overlay_video 1`); no argument stops it |
 | `bimp_probe_noupload <0\|1>` | Skip the frame sink's texture upload (frames still counted), to separate the upload's cost |
 | `bimp_yt_codec h264` | Play YouTube from its H.264/AAC formats (up to 1080p60) instead of VP9/AV1; empty = default |
+| `bimp_yt_hdr <0\|1>` | Pick HDR YouTube formats over SDR (default `0`), to see how the engine decodes them: HDR VP9 plays no video and 10-bit AV1 is garbage (see ARCHITECTURE.md, HDR) |
+| `bimp_probe_dump <name> [seconds] [count] [interval]` | Save decoded video frames as small PNGs `lab/dump_<name>[_NN].png` in `FileSystem.Data`, from a media time on (compare a stream with another copy of the same moment) |
 | `bimp_yt_fetch …`, `bimp_lab_*`, `bimp_probe_garbage` | Lower-level experiments (see their help text) |
 
 Tips:

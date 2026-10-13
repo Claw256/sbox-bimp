@@ -193,6 +193,28 @@ public static class Ebml
 		return b;
 	}
 
+	/// <summary> The number of bytes <see cref="EncodeSize"/> uses for this size when no length is given. </summary>
+	public static int SizeLength( long size )
+	{
+		var length = 1;
+		while ( size >= (1L << (7 * length)) - 1 ) length++;
+		return length;
+	}
+
+	/// <summary>
+	/// An element's ID and size bytes - what <see cref="Make"/> puts in front of the data - followed by
+	/// <paramref name="extra"/> zeroed bytes for the caller to fill in. Lets a big element be written in pieces.
+	/// </summary>
+	public static byte[] Header( uint id, long dataLength, int extra = 0, int sizeLength = 0 )
+	{
+		var idBytes = EncodeId( id );
+		var size = EncodeSize( dataLength, sizeLength );
+		var result = new byte[idBytes.Length + size.Length + extra];
+		Buffer.BlockCopy( idBytes, 0, result, 0, idBytes.Length );
+		Buffer.BlockCopy( size, 0, result, idBytes.Length, size.Length );
+		return result;
+	}
+
 	public static byte[] Concat( params byte[][] parts )
 	{
 		var total = 0;

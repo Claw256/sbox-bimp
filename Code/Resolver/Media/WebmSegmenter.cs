@@ -318,7 +318,6 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		// the video clusters, byte for byte, running on into the next segment (see VideoOverlapSeconds)
 		var (kEnd, cut, vEnd) = VideoOverlap( video, first, end, t1, last );
 		var vStart = video.ClusterStart( first );
-		var videoTask = video.File.ReadAsync( vStart, vEnd, ct );
 
 		// the audio clusters covering [t0, t1 + tail)
 		var tail = t1 == long.MaxValue ? long.MaxValue : t1 + audio.TimeOf( AudioTailSeconds );
@@ -326,96 +325,116 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		var aj = tail == long.MaxValue ? audio.Cues.Count : audio.FirstIndexFrom( tail );
 		var aStart = audio.ClusterStart( ai );
 		var aEnd = aj < audio.Cues.Count ? audio.ClusterStart( aj ) : audio.SegmentEnd;
-		var audioTask = audio.File.ReadAsync( aStart, aEnd, ct );
+
+		var videoTask = video.File.ReadPooledAsync( vStart, vEnd, ct );
+		var audioTask = audio.File.ReadPooledAsync( aStart, aEnd, ct );
 
 		MediaProbe.Note( $"seg {seq}: downloading" );
 
-		// A mass refusal (403) fails both downloads at once: awaiting them one by one orphaned the second task,
-		// which resurfaced later as an unobserved-exception error. Await both, report the first failure.
-		Exception firstFailure = null;
-		foreach ( var t in new[] { videoTask, audioTask } )
+		// The downloads sit in pooled buffers (see PooledRange): they go back in the finally, once the mux has written
+		// the file - the video blocks are slices of the buffer until then - or on any failure, a cancelled build included.
+		try
 		{
-			try { await t; }
-			catch ( OperationCanceledException ) when ( ct.IsCancellationRequested ) { throw; }
-			catch ( Exception e ) { firstFailure ??= e; }
-		}
-		if ( firstFailure is not null ) throw firstFailure;
-
-		var videoBytes = videoTask.Result;
-		var audioBytes = audioTask.Result;
-		MediaProbe.Note( $"seg {seq}: downloaded {(videoBytes.Length + audioBytes.Length) / 1048576.0:0} MB" );
-
-		// Parsing the audio and assembling the entries copies megabytes of clusters - done on a worker thread with
-		// the write, so the main thread (and every player's Present()) never waits on it.
-		var vtrack = video.TrackNumber;
-		ulong atrack = vtrack != 1 ? 1UL : 2UL;
-		var path = $"{directory}/seg_{seq}.webm";
-		long firstBlockTime = t0;
-		long lastVideo = t0;
-
-		await GameTask.RunInThreadAsync( () =>
-		{
-			var blocks = WebmMux.ParseBlocks( audioBytes, 0, audioBytes.Length );
-			if ( blocks.Count > 0 ) firstBlockTime = blocks[0].Time;
-
-			// audio from before the very first video cue goes in front of it
-			byte[] pre = null;
-			if ( first == 0 )
+			// A mass refusal (403) fails both downloads at once: awaiting them one by one orphaned the second task,
+			// which resurfaced later as an unobserved-exception error. Await both, report the first failure.
+			Exception firstFailure = null;
+			foreach ( var t in new[] { videoTask, audioTask } )
 			{
-				var early = blocks.Where( b => b.Time < t0 ).ToList();
-				if ( early.Count > 0 ) pre = Ebml.Concat( WebmMux.Clusters( early, atrack ).Select( c => c.cluster ) );
+				try { await t; }
+				catch ( OperationCanceledException ) when ( ct.IsCancellationRequested ) { throw; }
+				catch ( Exception e ) { firstFailure ??= e; }
 			}
+			if ( firstFailure is not null ) throw firstFailure;
 
-			// Each entry: the video clusters from a cue point, with the audio for the same time woven in among their blocks.
-			// The engine reads a file in order and only holds a few seconds of packets: audio written after a whole
-			// keyframe interval of video (5-7 s, up to 18 MB at 4K) reached it too late, and it went silent for 1-3 s at a
-			// time (measured). Clusters still start at keyframes - the engine's forward seek lands on any cluster.
-			var entries = new List<MuxEntry>();
-			var bi = 0;
-			while ( bi < blocks.Count && blocks[bi].Time < t0 ) bi++;
+			// the buffers can be larger than what was downloaded: only Length bytes are the range
+			var videoBytes = videoTask.Result.Data;
+			var videoLength = videoTask.Result.Length;
+			var audioBytes = audioTask.Result.Data;
+			var audioLength = audioTask.Result.Length;
+			MediaProbe.Note( $"seg {seq}: downloaded {(videoLength + audioLength) / 1048576.0:0} MB" );
 
-			for ( int k = first; k < kEnd; k++ )
+			// Parsing the audio and assembling the entries copies megabytes of clusters - done on a worker thread with
+			// the write, so the main thread (and every player's Present()) never waits on it.
+			var vtrack = video.TrackNumber;
+			ulong atrack = vtrack != 1 ? 1UL : 2UL;
+			var path = $"{directory}/seg_{seq}.webm";
+			long firstBlockTime = t0;
+			long lastVideo = t0;
+
+			await GameTask.RunInThreadAsync( () =>
 			{
-				var entry = new MuxEntry { Time = cues[k].Time };
-				var from = (int)(video.ClusterStart( k ) - vStart);
-				var to = (int)Math.Min( video.ClusterEnd( k ) - vStart, videoBytes.Length );
-				var clusters = videoBytes;
-				if ( video.IsMp4 )
+				var blocks = WebmMux.ParseBlocks( audioBytes, 0, audioLength );
+				if ( blocks.Count > 0 ) firstBlockTime = blocks[0].Time;
+
+				// audio from before the very first video cue goes in front of it
+				byte[] pre = null;
+				if ( first == 0 )
 				{
-					// AV1 from a fragmented MP4: its fragments become clusters first (the last may be cut off)
-					clusters = video.ClustersFromMp4( videoBytes, from, to, vStart, partial: k == kEnd - 1 );
-					from = 0;
-					to = clusters.Length;
+					var early = blocks.Where( b => b.Time < t0 ).ToList();
+					if ( early.Count > 0 ) pre = Ebml.Concat( WebmMux.Clusters( early, atrack ).Select( c => c.cluster ) );
 				}
 
-				// the last entry's audio runs on past the end (see AudioTailSeconds)
-				var next = k + 1 < cues.Count ? cues[k + 1].Time : long.MaxValue;
-				var until = k + 1 < kEnd ? next : tail;
-				var group = new List<MediaBlock>();
-				while ( bi < blocks.Count && blocks[bi].Time < until ) group.Add( blocks[bi++] );
-				var parts = WebmMux.Interleave( clusters, from, to, Math.Min( next, cut ), group, atrack, cut, ref lastVideo );
-				if ( parts.Count == 0 ) continue;
-				entry.Parts.AddRange( parts );
+				// Each entry: the video clusters from a cue point, with the audio for the same time woven in among their blocks.
+				// The engine reads a file in order and only holds a few seconds of packets: audio written after a whole
+				// keyframe interval of video (5-7 s, up to 18 MB at 4K) reached it too late, and it went silent for 1-3 s at a
+				// time (measured). Clusters still start at keyframes - the engine's forward seek lands on any cluster.
+				// The clusters stay descriptions (slices of the download): WebmMux.Write streams them out, nothing the size of
+				// a cluster is built in memory.
+				var entries = new List<MuxEntry>();
+				var bi = 0;
+				while ( bi < blocks.Count && blocks[bi].Time < t0 ) bi++;
 
-				entries.Add( entry );
-			}
+				for ( int k = first; k < kEnd; k++ )
+				{
+					var entry = new MuxEntry { Time = cues[k].Time };
+					var from = (int)(video.ClusterStart( k ) - vStart);
+					var to = (int)Math.Min( video.ClusterEnd( k ) - vStart, videoLength );
 
-			var tracks = Ebml.Make( Ebml.Tracks, Ebml.Concat( video.TrackEntry, WebmMux.FixMonoOpus( WebmMux.RenumberTrack( audio.TrackEntry, atrack, 0x6A696D6200000000UL | atrack ) ) ) );
-			using var file = FileSystem.Data.OpenWrite( path );
-			WebmMux.Write( file, video.EbmlHeader, video.TimecodeScale, duration, tracks, vtrack, entries, pre );
-		} );
-		ct.ThrowIfCancellationRequested();
-		MediaProbe.Note( $"seg {seq}: written" );
+					// the last entry's audio runs on past the end (see AudioTailSeconds)
+					var next = k + 1 < cues.Count ? cues[k + 1].Time : long.MaxValue;
+					var until = k + 1 < kEnd ? next : tail;
+					var group = new List<MediaBlock>();
+					while ( bi < blocks.Count && blocks[bi].Time < until ) group.Add( blocks[bi++] );
 
-		return new MediaSegment
+					// AV1 from a fragmented MP4: its fragments become clusters first (the last may be cut off)
+					var clusters = video.IsMp4
+						? WebmMux.InterleaveStreamed( video.ClusterBlocksFromMp4( videoBytes, from, to, vStart, partial: k == kEnd - 1 ), Math.Min( next, cut ), group, atrack, cut, ref lastVideo )
+						: WebmMux.InterleaveStreamed( videoBytes, from, to, Math.Min( next, cut ), group, atrack, cut, ref lastVideo );
+					if ( clusters.Count == 0 ) continue;
+					entry.Clusters.AddRange( clusters );
+
+					entries.Add( entry );
+				}
+
+				var tracks = Ebml.Make( Ebml.Tracks, Ebml.Concat( video.TrackEntry, WebmMux.FixMonoOpus( WebmMux.RenumberTrack( audio.TrackEntry, atrack, 0x6A696D6200000000UL | atrack ) ) ) );
+				using var file = FileSystem.Data.OpenWrite( path );
+				WebmMux.Write( file, video.EbmlHeader, video.TimecodeScale, duration, tracks, vtrack, entries, pre );
+			} );
+			ct.ThrowIfCancellationRequested();
+			MediaProbe.Note( $"seg {seq}: written" );
+
+			return new MediaSegment
+			{
+				Seq = seq,
+				Path = path,
+				Start = (float)video.SecondsOf( first == 0 ? Math.Min( t0, firstBlockTime ) : t0 ),
+				End = (float)(t1 == long.MaxValue ? video.SecondsOf( (long)duration ) : video.SecondsOf( t1 )),
+				Last = last,
+				Overlap = last ? 0 : (float)Math.Max( video.SecondsOf( lastVideo - t1 ), 0 ),
+			};
+		}
+		finally
 		{
-			Seq = seq,
-			Path = path,
-			Start = (float)video.SecondsOf( first == 0 ? Math.Min( t0, firstBlockTime ) : t0 ),
-			End = (float)(t1 == long.MaxValue ? video.SecondsOf( (long)duration ) : video.SecondsOf( t1 )),
-			Last = last,
-			Overlap = last ? 0 : (float)Math.Max( video.SecondsOf( lastVideo - t1 ), 0 ),
-		};
+			ReturnBuffer( videoTask );
+			ReturnBuffer( audioTask );
+		}
+	}
+
+	/// <summary> Give a download's buffer back, whether the build is done with it or never got that far (see <see cref="PooledRange"/>). </summary>
+	static void ReturnBuffer( Task<PooledRange> download )
+	{
+		if ( download.IsCompletedSuccessfully ) download.Result.Dispose();
+		else if ( !download.IsCompleted ) download.ContinueWith( t => { if ( t.IsCompletedSuccessfully ) t.Result.Dispose(); } ); // still running: its owner is nobody now
 	}
 
 	async Task<MediaSegment> BuildAudioOnly()
@@ -423,7 +442,9 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		var ct = cts.Token;
 		var (_, first, _, _) = ranges[0];
 		var start = audio.ClusterStart( first );
-		var data = await audio.File.ReadAsync( start, audio.SegmentEnd, ct );
+
+		// a pooled buffer, given back when the file is written (or the build fails) - only data.Length bytes are the audio
+		using var data = await audio.File.ReadPooledAsync( start, audio.SegmentEnd, ct );
 
 		var track = audio.TrackNumber;
 		var path = $"{directory}/audio.webm";
@@ -431,7 +452,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 
 		await GameTask.RunInThreadAsync( () =>
 		{
-			var blocks = WebmMux.ParseBlocks( data, 0, data.Length );
+			var blocks = WebmMux.ParseBlocks( data.Data, 0, data.Length );
 			if ( blocks.Count == 0 ) throw new MergeException( "no audio blocks" );
 			firstTime = blocks[0].Time;
 

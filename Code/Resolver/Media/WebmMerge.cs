@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO;
 using System.Threading;
@@ -158,8 +159,166 @@ public sealed class MediaBlock
 public sealed class MuxEntry
 {
 	public long Time;
+
+	/// <summary> Literal bytes (a ready made cluster). Written first, then <see cref="Clusters"/>. </summary>
 	public List<byte[]> Parts = new();
-	public long Length => Parts.Sum( p => (long)p.Length );
+
+	/// <summary> Clusters described by slices of other buffers, never copied into one array (see <see cref="MuxCluster"/>). Written after <see cref="Parts"/>. </summary>
+	public List<MuxCluster> Clusters = new();
+
+	public long Length
+	{
+		get
+		{
+			long total = 0;
+			foreach ( var p in Parts ) total += p.Length;
+			foreach ( var c in Clusters ) total += c.Length;
+			return total;
+		}
+	}
+}
+
+/// <summary> A range of a byte array. </summary>
+public readonly struct MuxSlice
+{
+	public readonly byte[] Array;
+	public readonly int Offset;
+	public readonly int Length;
+
+	public MuxSlice( byte[] array, int offset, int length )
+	{
+		Array = array;
+		Offset = offset;
+		Length = length;
+	}
+}
+
+/// <summary>
+/// A Cluster element that isn't built in memory: its header is computed from the total length of its pieces, and
+/// the pieces (the video blocks are slices of the downloaded file) go straight to the output in
+/// <see cref="WebmMux.Write"/>. Add every piece before asking for <see cref="Length"/> or writing it.
+/// </summary>
+public sealed class MuxCluster
+{
+	readonly List<MuxSlice> slices = new();
+	long dataLength;
+	byte[] header;
+
+	/// <summary> A finished element (header included) as a cluster of its own. </summary>
+	public static MuxCluster FromElement( byte[] element )
+	{
+		var cluster = new MuxCluster { header = Array.Empty<byte>() };
+		cluster.Add( element );
+		return cluster;
+	}
+
+	public void Add( byte[] array ) => Add( array, 0, array.Length );
+
+	public void Add( byte[] array, int offset, int length )
+	{
+		if ( length == 0 ) return;
+		slices.Add( new MuxSlice( array, offset, length ) );
+		dataLength += length;
+	}
+
+	/// <summary> Element ID and size, as <see cref="Ebml.Make"/> would have written them for the whole data. </summary>
+	byte[] Header => header ??= Ebml.Header( Ebml.Cluster, dataLength );
+
+	/// <summary> Header and data. </summary>
+	public long Length => Header.Length + dataLength;
+
+	internal void WriteTo( MuxWriter writer )
+	{
+		writer.Write( Header );
+		for ( int i = 0; i < slices.Count; i++ )
+			writer.Write( slices[i].Array, slices[i].Offset, slices[i].Length );
+	}
+
+	/// <summary> The whole element in one array (copies it - for callers that need bytes). </summary>
+	public byte[] ToArray()
+	{
+		var result = new byte[Length];
+		var h = Header;
+		Buffer.BlockCopy( h, 0, result, 0, h.Length );
+		var o = h.Length;
+		for ( int i = 0; i < slices.Count; i++ )
+		{
+			Buffer.BlockCopy( slices[i].Array, slices[i].Offset, result, o, slices[i].Length );
+			o += slices[i].Length;
+		}
+		return result;
+	}
+}
+
+/// <summary>
+/// Buffers small writes (block headers, timecodes) so the output stream sees few, large writes - and passes big ones
+/// (video blocks) straight through from where they are.
+/// </summary>
+public sealed class MuxWriter : IDisposable
+{
+	const int BufferSize = 64 * 1024;
+
+	readonly Stream output;
+	byte[] buffer = ArrayPool<byte>.Shared.Rent( BufferSize );
+	int used;
+
+	public MuxWriter( Stream output ) { this.output = output; }
+
+	public void Write( byte[] data ) => Write( data, 0, data.Length );
+
+	public void Write( byte[] data, int offset, int length )
+	{
+		if ( length >= buffer.Length / 2 )
+		{
+			Flush();
+			output.Write( data.AsSpan( offset, length ) );
+			return;
+		}
+		if ( used + length > buffer.Length ) Flush();
+		Buffer.BlockCopy( data, offset, buffer, used, length );
+		used += length;
+	}
+
+	public void Flush()
+	{
+		if ( used > 0 ) output.Write( buffer.AsSpan( 0, used ) );
+		used = 0;
+	}
+
+	public void Dispose()
+	{
+		if ( buffer is null ) return;
+		ArrayPool<byte>.Shared.Return( buffer );
+		buffer = null;
+	}
+}
+
+/// <summary> A video block as it goes into an output cluster: <see cref="Head"/> (if any), then a slice of <see cref="Array"/>. </summary>
+public readonly struct VideoBlock
+{
+	/// <summary> Absolute, in timecode units. </summary>
+	public readonly long Time;
+	/// <summary> Bytes in front of the slice (an MP4 sample's block element header), or null. </summary>
+	public readonly byte[] Head;
+	public readonly byte[] Array;
+	public readonly int Offset;
+	public readonly int Length;
+
+	public VideoBlock( long time, byte[] head, byte[] array, int offset, int length )
+	{
+		Time = time;
+		Head = head;
+		Array = array;
+		Offset = offset;
+		Length = length;
+	}
+}
+
+/// <summary> A video cluster's timecode and its block elements, by reference. </summary>
+public sealed class VideoCluster
+{
+	public long Tc;
+	public List<VideoBlock> Blocks = new();
 }
 
 /// <summary>
@@ -226,14 +385,17 @@ public static class WebmMux
 		return BinaryPrimitives.ReadInt16BigEndian( payload.Slice( n, 2 ) );
 	}
 
-	static byte[] RewriteBlockPayload( ReadOnlySpan<byte> payload, ulong track, long rel )
+	/// <summary> A Block / SimpleBlock element (header included) with its track number and relative time rewritten, in one array. </summary>
+	static byte[] RewrittenBlock( uint id, ReadOnlySpan<byte> payload, ulong track, long rel )
 	{
 		var (_, n) = Ebml.ReadSize( payload, 0 );
 		var head = Ebml.EncodeSize( (long)track, 1 );
-		var result = new byte[head.Length + 2 + payload.Length - n - 2];
-		head.CopyTo( result, 0 );
-		BinaryPrimitives.WriteInt16BigEndian( result.AsSpan( head.Length, 2 ), checked((short)rel) );
-		payload[(n + 2)..].CopyTo( result.AsSpan( head.Length + 2 ) );
+		var dataLength = head.Length + 2 + payload.Length - n - 2;
+		var result = Ebml.Header( id, dataLength, dataLength );
+		var o = result.Length - dataLength;
+		head.CopyTo( result, o );
+		BinaryPrimitives.WriteInt16BigEndian( result.AsSpan( o + head.Length, 2 ), checked((short)rel) );
+		payload[(n + 2)..].CopyTo( result.AsSpan( o + head.Length + 2 ) );
 		return result;
 	}
 
@@ -252,13 +414,13 @@ public static class WebmMux
 	static byte[] BlockElement( MediaBlock b, ulong track, long rel )
 	{
 		if ( b.Kind == Ebml.SimpleBlock )
-			return Ebml.Make( Ebml.SimpleBlock, RewriteBlockPayload( b.Body, track, rel ) );
+			return RewrittenBlock( Ebml.SimpleBlock, b.Body, track, rel );
 
 		var group = new List<byte[]>();
 		foreach ( var g in Ebml.Children( b.Body, 0, b.Body.Length ) )
 		{
 			if ( g.Id == Ebml.Block )
-				group.Add( Ebml.Make( Ebml.Block, RewriteBlockPayload( Ebml.Data( b.Body, g ), track, rel ) ) );
+				group.Add( RewrittenBlock( Ebml.Block, Ebml.Data( b.Body, g ), track, rel ) );
 			else
 				group.Add( b.Body.AsSpan( (int)g.Offset, (int)(g.End - g.Offset) ).ToArray() );
 		}
@@ -294,34 +456,74 @@ public static class WebmMux
 	/// </summary>
 	public static List<byte[]> Interleave( byte[] buf, int start, int end, long videoEnd, List<MediaBlock> audio, ulong audioTrack, long videoCut, ref long lastVideo )
 	{
-		var clusters = new List<(long tc, List<(long time, int offset, int length)> blocks)>();
+		// the materialising form: every cluster in an array of its own
+		var result = new List<byte[]>();
+		foreach ( var cluster in InterleaveStreamed( buf, start, end, videoEnd, audio, audioTrack, videoCut, ref lastVideo ) )
+			result.Add( cluster.ToArray() );
+		return result;
+	}
+
+	/// <summary>
+	/// Like <see cref="Interleave"/>, but the clusters stay descriptions (slices of <paramref name="buf"/> for the video
+	/// blocks, small arrays for the rest): add them to <see cref="MuxEntry.Clusters"/> and <see cref="Write"/> streams
+	/// them out. Nothing the size of a cluster is allocated. The output bytes are the same.
+	/// </summary>
+	public static List<MuxCluster> InterleaveStreamed( byte[] buf, int start, int end, long videoEnd, List<MediaBlock> audio, ulong audioTrack, long videoCut, ref long lastVideo )
+		=> InterleaveStreamed( ParseVideoClusters( buf, start, end ), videoEnd, audio, audioTrack, videoCut, ref lastVideo );
+
+	/// <summary> The video clusters of buf[start..end] with every block element as a slice of <paramref name="buf"/>. </summary>
+	public static List<VideoCluster> ParseVideoClusters( byte[] buf, int start, int end )
+	{
+		var clusters = new List<VideoCluster>();
 		foreach ( var cl in Ebml.ChildrenPartial( buf, start, end ) )
 		{
 			if ( cl.Id != Ebml.Cluster ) continue;
 			var clEnd = cl.Size == Ebml.UnknownSize ? end : Math.Min( cl.End, end );
-			var cluster = (tc: 0L, blocks: new List<(long, int, int)>());
+			var cluster = new VideoCluster();
 			foreach ( var c in Ebml.ChildrenPartial( buf, cl.DataOffset, clEnd ) )
 			{
 				if ( c.End > clEnd ) break; // cut off
-				if ( c.Id == Ebml.Timecode ) cluster.tc = (long)Ebml.ReadUInt( Ebml.Data( buf, c ) );
+				if ( c.Id == Ebml.Timecode ) cluster.Tc = (long)Ebml.ReadUInt( Ebml.Data( buf, c ) );
 				else if ( c.Id == Ebml.SimpleBlock || c.Id == Ebml.BlockGroup )
 				{
-					var time = cluster.tc + BlockRelativeTime( buf, c );
-					if ( time < videoCut ) cluster.blocks.Add( (time, (int)c.Offset, (int)(c.End - c.Offset)) );
+					var time = cluster.Tc + BlockRelativeTime( buf, c );
+					cluster.Blocks.Add( new VideoBlock( time, null, buf, (int)c.Offset, (int)(c.End - c.Offset) ) );
 				}
 			}
-			if ( cluster.blocks.Count == 0 ) continue;
 			clusters.Add( cluster );
-			lastVideo = Math.Max( lastVideo, cluster.blocks.Max( b => b.Item1 ) );
+		}
+		return clusters;
+	}
+
+	/// <summary>
+	/// <see cref="Interleave"/> over video clusters that are already parsed (the AV1 path builds them from MP4 samples).
+	/// </summary>
+	public static List<MuxCluster> InterleaveStreamed( List<VideoCluster> video, long videoEnd, List<MediaBlock> audio, ulong audioTrack, long videoCut, ref long lastVideo )
+	{
+		// drop the blocks from videoCut on, and the clusters left empty
+		var clusters = new List<(long tc, List<VideoBlock> blocks)>();
+		foreach ( var cl in video )
+		{
+			var blocks = cl.Blocks;
+			foreach ( var vb in cl.Blocks )
+			{
+				if ( vb.Time < videoCut ) continue;
+				blocks = cl.Blocks.FindAll( x => x.Time < videoCut );
+				break;
+			}
+			if ( blocks.Count == 0 ) continue;
+			clusters.Add( (cl.Tc, blocks) );
+			foreach ( var vb in blocks ) lastVideo = Math.Max( lastVideo, vb.Time );
 		}
 
-		var result = new List<byte[]>();
+		var result = new List<MuxCluster>();
 		var ai = 0;
 		for ( int i = 0; i < clusters.Count; i++ )
 		{
 			var (tc, blocks) = clusters[i];
 			var spanEnd = i + 1 < clusters.Count ? clusters[i + 1].tc : videoEnd;
-			var parts = new List<byte[]> { Ebml.UIntElement( Ebml.Timecode, (ulong)tc ) };
+			var cluster = new MuxCluster();
+			cluster.Add( Ebml.UIntElement( Ebml.Timecode, (ulong)tc ) );
 
 			// Each audio block goes just ahead of the first video block after its time - but never ahead of the cluster's
 			// first (key)frame: the engine didn't show a segment whose first cluster started with an audio block.
@@ -329,18 +531,22 @@ public static class WebmMux
 			for ( int b = 0; b < blocks.Count; b++ )
 			{
 				var v = blocks[b];
-				while ( b > 0 && ai < audio.Count && audio[ai].Time < v.time && AudioFits( audio[ai] ) )
-					parts.Add( BlockElement( audio[ai], audioTrack, audio[ai++].Time - tc ) );
-				parts.Add( buf.AsSpan( v.offset, v.length ).ToArray() );
+				while ( b > 0 && ai < audio.Count && audio[ai].Time < v.Time && AudioFits( audio[ai] ) )
+					cluster.Add( BlockElement( audio[ai], audioTrack, audio[ai++].Time - tc ) );
+				if ( v.Head is not null ) cluster.Add( v.Head );
+				cluster.Add( v.Array, v.Offset, v.Length ); // straight from the source buffer
 			}
 			while ( ai < audio.Count && AudioFits( audio[ai] ) )
-				parts.Add( BlockElement( audio[ai], audioTrack, audio[ai++].Time - tc ) );
+				cluster.Add( BlockElement( audio[ai], audioTrack, audio[ai++].Time - tc ) );
 
-			result.Add( Ebml.Make( Ebml.Cluster, Ebml.Concat( parts ) ) );
+			result.Add( cluster );
 		}
 
 		if ( ai < audio.Count )
-			result.AddRange( Clusters( audio.GetRange( ai, audio.Count - ai ), audioTrack ).Select( c => c.cluster ) );
+		{
+			foreach ( var c in Clusters( audio.GetRange( ai, audio.Count - ai ), audioTrack ) )
+				result.Add( MuxCluster.FromElement( c.cluster ) );
+		}
 		return result;
 	}
 
@@ -480,16 +686,23 @@ public static class WebmMux
 		var segmentDataLength = cuesPos + cues.Length;
 		var seekHead = SeekHead( (Ebml.Info, infoPos), (Ebml.Tracks, tracksPos), (Ebml.Cues, cuesPos) );
 
-		output.Write( ebmlHeader );
-		output.Write( Ebml.EncodeId( Ebml.Segment ) );
-		output.Write( Ebml.EncodeSize( segmentDataLength, 8 ) );
-		output.Write( seekHead );
-		output.Write( info );
-		output.Write( tracks );
-		output.Write( pre );
+		// second pass: the sizes above came from lengths alone, the pieces (video blocks) are written from where they are
+		using var writer = new MuxWriter( output );
+		writer.Write( ebmlHeader );
+		writer.Write( Ebml.EncodeId( Ebml.Segment ) );
+		writer.Write( Ebml.EncodeSize( segmentDataLength, 8 ) );
+		writer.Write( seekHead );
+		writer.Write( info );
+		writer.Write( tracks );
+		writer.Write( pre );
 		foreach ( var e in entries )
+		{
 			foreach ( var p in e.Parts )
-				output.Write( p );
-		output.Write( cues );
+				writer.Write( p );
+			foreach ( var c in e.Clusters )
+				c.WriteTo( writer );
+		}
+		writer.Write( cues );
+		writer.Flush();
 	}
 }

@@ -55,6 +55,13 @@ public static class MediaSettings
 	public static string YouTubeCodec { get; set; } = "";
 
 	/// <summary>
+	/// [probe] Prefer an HDR format over the SDR one at the same height, to see how HDR frames come out of the decoder.
+	/// Not saved. Normal playback always prefers SDR (see FormatSelector.ScoreVideo).
+	/// </summary>
+	[ConVar( "bimp_yt_hdr", Help = "[probe] 1 = pick HDR YouTube formats over SDR (to test HDR output); 0 = default (SDR first)" )]
+	public static bool PreferHdr { get; set; }
+
+	/// <summary>
 	/// Local volume multiplier for every media player.
 	/// </summary>
 	[ConVar( "bimp_volume", ConVarFlags.Saved, Min = 0, Max = 1, Help = "Local volume of all media players (0-1)" )]

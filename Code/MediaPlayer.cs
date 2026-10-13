@@ -158,9 +158,67 @@ public sealed class MediaPlayer : Component
 	public MediaAudioTrack SelectedAudioTrack => MediaStreamOptions.ChooseAudioTrack( AvailableAudioTracks, MediaSettings.AudioLanguage );
 
 	/// <summary> <see cref="PlayUrl"/> plus this client's choices. Changing a choice reloads playback at the same time. </summary>
-	public string LocalStreamUrl => MediaStreamOptions.ApplyTo( PlayUrl, SelectedQuality, SelectedAudioTrack );
+	public string LocalStreamUrl
+	{
+		get
+		{
+			RefreshStreamCache();
+			return cachedLocalUrl;
+		}
+	}
 
-	string CurrentKey => KeyFor( PlayId, LocalStreamUrl );
+	string CurrentKey
+	{
+		get
+		{
+			RefreshStreamCache();
+			return cachedKey;
+		}
+	}
+
+	// Per-frame cache of LocalStreamUrl / CurrentKey. Recomputed only when one of the inputs changes (compared by value each call, no allocation).
+	bool streamCacheValid;
+	string cachedPlayUrl;
+	int cachedPlayId;
+	string cachedQualitiesIn;
+	string cachedAudioTracksIn;
+	int cachedQualityPref;
+	string cachedAudioLangPref;
+	string cachedLocalUrl;
+	string cachedKey;
+
+	void RefreshStreamCache()
+	{
+		var playUrl = PlayUrl;
+		var playId = PlayId;
+		var qualities = Qualities;
+		var audioTracks = AudioTracks;
+		var qualityPref = MediaSettings.Quality;
+		var audioLang = MediaSettings.AudioLanguage;
+
+		if ( streamCacheValid
+			&& playId == cachedPlayId
+			&& qualityPref == cachedQualityPref
+			&& string.Equals( playUrl, cachedPlayUrl )
+			&& string.Equals( qualities, cachedQualitiesIn )
+			&& string.Equals( audioTracks, cachedAudioTracksIn )
+			&& string.Equals( audioLang, cachedAudioLangPref ) )
+			return;
+
+		var quality = MediaStreamOptions.ChooseQuality( MediaStreamOptions.ParseQualities( qualities ), qualityPref );
+		var track = MediaStreamOptions.ChooseAudioTrack( MediaStreamOptions.ParseAudioTracks( audioTracks ), audioLang );
+		var url = MediaStreamOptions.ApplyTo( playUrl, quality, track );
+
+		cachedLocalUrl = url;
+		cachedKey = KeyFor( playId, url );
+		cachedPlayUrl = playUrl;
+		cachedPlayId = playId;
+		cachedQualitiesIn = qualities;
+		cachedAudioTracksIn = audioTracks;
+		cachedQualityPref = qualityPref;
+		cachedAudioLangPref = audioLang;
+		streamCacheValid = true;
+	}
 
 	//
 	// Captions. Every client fetches its own cues (the urls can be tied to the IP) and shows them against the shared timeline.

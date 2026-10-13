@@ -781,6 +781,20 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 	static readonly Regex MimePattern = new( "^(?<type>audio|video)/(?<container>[a-z0-9]+)(?:;\\s*codecs=\"(?<codecs>[^\"]*)\")?", RegexOptions.Compiled );
 
+	/// <summary>
+	/// HDR when the label, the transfer function (PQ/HLG) or the primaries (BT.2020) say so - or the codec is 10-bit
+	/// (VP9 profile 2/3, AV1 with 10 or 12 bits), because some clients leave the colour info out of the format.
+	/// </summary>
+	static bool IsHdr( string qualityLabel, string transfer, string primaries, string vcodec )
+	{
+		if ( (qualityLabel ?? "").Contains( "HDR" ) || transfer.Contains( "2084" ) || transfer.Contains( "B67" ) || primaries.Contains( "2020" ) ) return true;
+		if ( string.IsNullOrEmpty( vcodec ) ) return false;
+
+		var parts = vcodec.Split( '.' );
+		if ( vcodec.StartsWith( "vp09" ) ) return parts.Length > 1 && parts[1] is "02" or "03";
+		return vcodec.StartsWith( "av01" ) && parts.Length > 3 && parts[3] is "10" or "12";
+	}
+
 	public static List<MediaFormat> ParseFormats( JsonNode player )
 	{
 		var result = new List<MediaFormat>();
@@ -808,6 +822,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			}
 
 			var transfer = f["colorInfo"]?["transferCharacteristics"].Str() ?? "";
+			var primaries = f["colorInfo"]?["primaries"].Str() ?? "";
 			var track = f["audioTrack"];
 			var trackId = track?["id"].Str();
 
@@ -822,7 +837,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				Fps = f["fps"].Float(),
 				Bitrate = f["averageBitrate"].Long() is > 0 and var avg ? avg : f["bitrate"].Long(),
 				Size = f["contentLength"].Long(),
-				Hdr = (f["qualityLabel"].Str() ?? "").Contains( "HDR" ) || transfer.Contains( "2084" ) || transfer.Contains( "B67" ),
+				Hdr = IsHdr( f["qualityLabel"].Str(), transfer, primaries, vcodec ),
 				Drc = f["isDrc"].Bool(),
 				Language = trackId?.Split( '.' )[0],
 				LanguageName = track?["displayName"].Str(),

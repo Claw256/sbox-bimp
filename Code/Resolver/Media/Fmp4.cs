@@ -133,40 +133,49 @@ public sealed partial class WebmSource
 	/// <summary>
 	/// The fragments (moof + mdat) in raw[start..end] as WebM clusters of SimpleBlocks: one cluster per keyframe
 	/// interval, so every cluster starts with a keyframe. <paramref name="fileOffset"/> is where raw[0] is in the file.
+	/// Only describes them: each block is a small header plus a slice of <paramref name="raw"/>, nothing is copied
+	/// (feed the result to WebmMux.InterleaveStreamed).
 	/// </summary>
-	public byte[] ClustersFromMp4( byte[] raw, int start, int end, long fileOffset, bool partial = false )
+	public List<VideoCluster> ClusterBlocksFromMp4( byte[] raw, int start, int end, long fileOffset, bool partial = false )
 	{
-		var clusters = new List<byte[]>();
-		var parts = new List<byte[]>();
+		var clusters = new List<VideoCluster>();
+		VideoCluster current = null;
 		long clusterTime = 0;
-
-		void Flush()
-		{
-			if ( parts.Count > 1 ) clusters.Add( Ebml.Make( Ebml.Cluster, Ebml.Concat( parts ) ) );
-			parts.Clear();
-		}
 
 		foreach ( var s in Fmp4Reader.ReadSamples( raw, start, end, new[] { mp4Track }, fileOffset, partial ) )
 		{
 			var time = (s.DecodeTime + s.CompositionOffset) * 1000 / mp4Timescale;
 
 			// a new cluster at each keyframe (and before the int16 relative time would overflow)
-			if ( parts.Count == 0 || s.Key || time - clusterTime > 30000 )
+			if ( current is null || s.Key || time - clusterTime > 30000 )
 			{
-				Flush();
 				clusterTime = time;
-				parts.Add( Ebml.UIntElement( Ebml.Timecode, (ulong)Math.Max( time, 0 ) ) );
+				current = new VideoCluster { Tc = Math.Max( time, 0 ) };
+				clusters.Add( current );
 			}
 
-			var block = new byte[4 + s.Size];
-			block[0] = 0x81; // track 1
-			BinaryPrimitives.WriteInt16BigEndian( block.AsSpan( 1 ), (short)(time - clusterTime) );
-			block[3] = s.Key ? (byte)0x80 : (byte)0;
-			Buffer.BlockCopy( raw, s.Offset, block, 4, s.Size );
-			parts.Add( Ebml.Make( Ebml.SimpleBlock, block ) );
+			// SimpleBlock header, then track 1, int16 time, flags - the sample itself follows as it is
+			var rel = (short)(time - clusterTime);
+			var head = Ebml.Header( Ebml.SimpleBlock, 4 + s.Size, 4 );
+			var o = head.Length - 4;
+			head[o] = 0x81; // track 1
+			BinaryPrimitives.WriteInt16BigEndian( head.AsSpan( o + 1 ), rel );
+			head[o + 3] = s.Key ? (byte)0x80 : (byte)0;
+			current.Blocks.Add( new VideoBlock( current.Tc + rel, head, raw, s.Offset, s.Size ) );
 		}
 
-		Flush();
-		return Ebml.Concat( clusters );
+		return clusters;
+	}
+
+	/// <summary>
+	/// <see cref="ClusterBlocksFromMp4"/> as one array of cluster elements (copies it all - prefer the streamed form).
+	/// </summary>
+	public byte[] ClustersFromMp4( byte[] raw, int start, int end, long fileOffset, bool partial = false )
+	{
+		long last = 0;
+		var clusters = WebmMux.InterleaveStreamed( ClusterBlocksFromMp4( raw, start, end, fileOffset, partial ), long.MaxValue, new List<MediaBlock>(), 1, long.MaxValue, ref last );
+		var arrays = new List<byte[]>();
+		foreach ( var c in clusters ) arrays.Add( c.ToArray() );
+		return Ebml.Concat( arrays );
 	}
 }

@@ -109,6 +109,12 @@ range-downloads a few seconds at a time (`RemoteFile`) and writes standalone Web
 - The audio blocks for the same time are woven in among the video blocks (`WebmMux.Interleave`), never ahead of a
   cluster's keyframe. The engine reads a file in order and holds only a few seconds of packets ahead, so audio placed
   after a whole keyframe interval of video (5–7 s) would reach it too late and drop out.
+- Building a segment doesn't copy the media around. The downloads sit in buffers rented from `ArrayPool<byte>.Shared`
+  (`RemoteFile.ReadPooledAsync` streams the chunks into one, `PooledRange`), `WebmMux.InterleaveStreamed` describes each
+  output cluster as slices of those buffers (`MuxCluster`, `MuxSlice`) with its header from `Ebml.Header`, and
+  `WebmMux.Write` computes every element size from lengths and streams the entries to the file (`MuxWriter`). The
+  buffers go back to the pool once the file is written. Before this, each segment allocated about 250 MB of
+  large-object-heap arrays.
 - The first segment is 8 s, so playback starts quickly; after that, segments are 40 s.
 - Each segment's audio runs 3 s past its end, and its video 1 s (`VideoOverlapSeconds`). A new player's first frame
   takes 150–520 ms at 1440p/4K, so the current one keeps showing real frames until the next is up.
@@ -166,6 +172,47 @@ Media requests can't claim the client's identity: the engine throws if code sets
 change client, not to disguise the request. Background work that nobody awaits (the next segment's build, captions,
 queueing) goes through `TaskExtensions.FireAndForget`, and parallel downloads are all awaited before the first failure is
 rethrown, so a failure can't resurface later as an unobserved task exception.
+
+## Hitches and garbage
+
+Playing a 1440p60 VP9 video sometimes showed bursts of render stalls (100-250 ms about every 220 ms, lasting 2-12 s,
+intermittent). The segment builder's garbage looked like the cause, so the copying above was removed, and
+`MediaPlayer` / `MediaStreamOptions` now cache the parsed qualities and the stream key per input so the per-frame path
+doesn't allocate. Measured with the probe's GC line on one 1440p60 VP9 video, three runs before and three after:
+
+| | before | after |
+|---|---|---|
+| Main-thread allocation | 15-16 MB/s | 8-12 MB/s |
+| Gen 1 collections | 1-3 | 0-3 |
+| Longest GC pause | 7-20 ms | 7-20 ms |
+
+GC pauses were short in both: the longest 7-20 ms, 30-60 ms in total per run, nowhere near the stalls. The stall bursts did not recur in the three runs after, but they were
+intermittent, so that isn't proof of anything. **Not a fix:** GC pauses were not what the stalls showed (main-thread GC
+pauses stayed small even during a 359 ms stall). The evidence points more at the texture upload path (a run with
+`bimp_probe_noupload 1` was clean), and that is unresolved.
+
+## HDR
+
+`YouTubeExtractor.IsHdr` marks a format HDR when its label says HDR, its transfer is PQ or HLG, its primaries are
+BT.2020, or its codec is 10-bit (`vp09.02` / `vp09.03`, `av01` at 10 or 12 bits). Normal playback prefers SDR
+(`FormatSelector.ScoreVideo`), and the 4K60 AV1 choice only takes 8-bit SDR AV1 (`Av1Like`), so a video whose AV1 copies
+are all 10-bit HDR plays its SDR VP9 1440p60 copy.
+
+That is deliberate: **the engine can't decode 10-bit video.** Observed with the `bimp_yt_hdr 1` probe switch and
+`bimp_probe_dump` (which saves decoded frames as small PNGs, to compare an HDR stream with the SDR copy of the same
+moment):
+
+- **VP9 profile 2: no video at all.** Audio plays and nothing is logged.
+- **10-bit AV1: garbage from the first frame** - flat grey, then structured colour noise with about a third of the SDR
+  copy's brightness range - for as long as the AV1 stream plays, whether it starts at 0:00 or midway. 8-bit AV1 decodes
+  correctly from any start. The garbage is the same with the previous segment-writing code, and it is not the AV1 to
+  VP9 swap: the frames before the swap are the bad ones, those after it are fine.
+
+So there is nothing valid to tone map. (A GPU HDR to SDR pass does fit the C# whitelist - a camera command list that
+draws the video texture through a shader into a render target the screen shows, written with hardware sRGB encode - but
+it only ever saw garbage or SDR frames, so it was dropped.) A video with no SDR copy plays audio only. `bimp_yt_hdr`
+stays as the probe for re-testing if the engine's decoder changes; with it on, the AV1 fallback is HDR VP9, which
+doesn't decode, so playback loops reloading once the AV1 allowance is used up.
 
 ## Live streams
 

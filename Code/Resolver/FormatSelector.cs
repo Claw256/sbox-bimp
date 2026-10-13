@@ -64,7 +64,7 @@ public static class FormatSelector
 	/// washed out anyway), then fps, then bitrate.
 	/// </summary>
 	static (bool, bool, int, float, long) ScoreVideo( MediaFormat f, int limit )
-		=> (f.Height <= limit, !f.Hdr, f.Height <= limit ? f.Height : -f.Height, f.Fps, f.Bitrate);
+		=> (f.Height <= limit, MediaSettings.PreferHdr ? f.Hdr : !f.Hdr, f.Height <= limit ? f.Height : -f.Height, f.Fps, f.Bitrate);
 
 	/// <summary>
 	/// VP9 at 4K and more than 30 fps: more than the engine's VP9 decoder keeps up with (measured 19-45 frames a second
@@ -74,8 +74,8 @@ public static class FormatSelector
 
 	/// <summary> An 8-bit SDR AV1 video-only MP4 with the same height and frame rate, highest bitrate first. </summary>
 	public static MediaFormat Av1Like( IEnumerable<MediaFormat> formats, MediaFormat like )
-		=> formats.Where( f => f.Container == "mp4" && !f.HasAudio && !f.Hdr && f.Height == like.Height && MathF.Abs( f.Fps - like.Fps ) < 1
-				&& f.VideoCodec is { } v && v.StartsWith( "av01" ) && v.Split( '.' ) is { Length: >= 4 } p && p[3] == "08" )
+		=> formats.Where( f => f.Container == "mp4" && !f.HasAudio && f.Hdr == MediaSettings.PreferHdr && f.Height == like.Height && MathF.Abs( f.Fps - like.Fps ) < 1
+				&& f.VideoCodec is { } v && v.StartsWith( "av01" ) && v.Split( '.' ) is { Length: >= 4 } p && p[3] == (MediaSettings.PreferHdr ? "10" : "08") )
 			.OrderByDescending( f => f.Bitrate )
 			.FirstOrDefault();
 
