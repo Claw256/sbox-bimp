@@ -11,6 +11,6 @@
   "Mounts": null,
   "IsStandaloneOnly": false,
   "Metadata": {
-    "Summary": "Drop-in networked media player: YouTube + direct video/audio URLs, synced playback, queue, 3D audio."
+    "Summary": "Drop-in networked media player: YouTube, Twitch, Kick, SoundCloud, live streams and direct links, synced playback, queue, captions, 3D audio."
   }
 }

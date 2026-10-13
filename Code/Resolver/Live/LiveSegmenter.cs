@@ -500,7 +500,7 @@ public sealed class LiveSegmenter : ISegmentFeed, IDisposable
 		if ( flush is not null && v.Count > 0 ) v.AddRange( flush );
 
 		MediaProbe.Note( $"segment {seq} cut, snapshot {snapTimer.Elapsed.TotalMilliseconds:0.0}ms" );
-		_ = WriteSegmentAsync( seq, start, end, overlap, v, segFormat, a, aac );
+		WriteSegmentAsync( seq, start, end, overlap, v, segFormat, a, aac ).FireAndForget( $"write live segment {seq}" );
 	}
 
 	/// <summary>

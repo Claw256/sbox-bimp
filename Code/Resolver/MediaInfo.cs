@@ -64,6 +64,12 @@ public sealed class StreamRequest
 
 	/// <summary> Audio language the client picked, null for the original. </summary>
 	public string Language { get; set; }
+
+	/// <summary> A resolver client whose urls refused mid-download: re-resolving skips it, its fresh urls pass the probe and die the same way (see <see cref="StreamFile.ClientKey"/>). </summary>
+	public string AvoidClient { get; set; }
+
+	/// <summary> A copy of this request that avoids a client whose urls just refused. </summary>
+	public StreamRequest Avoiding( string clientKey ) => new() { AudioOnly = AudioOnly, MaxHeight = MaxHeight, Height = Height, Language = Language, AvoidClient = clientKey };
 }
 
 public enum StreamKind
@@ -99,6 +105,9 @@ public sealed class StreamFile
 
 	/// <summary> "webm", or "mp4" for a fragmented MP4 (YouTube's AV1). </summary>
 	public string Container { get; set; } = "webm";
+
+	/// <summary> The resolver client that minted Url (null off YouTube). Media GETs identify as it, and a refusal re-resolves past it - a dead client's fresh urls pass the probe all the same. </summary>
+	public string ClientKey { get; set; }
 }
 
 /// <summary>
@@ -121,6 +130,9 @@ public sealed class StreamPlan
 
 	/// <summary> For <see cref="StreamKind.Direct"/>, <see cref="StreamKind.Hls"/> and <see cref="StreamKind.Live"/>. </summary>
 	public string DirectUrl { get; set; }
+
+	/// <summary> The client that minted the plan's urls - an AV1 <see cref="Video"/> can come from another one (see <see cref="StreamFile.ClientKey"/>). </summary>
+	public string ClientKey { get; set; }
 }
 
 /// <summary>

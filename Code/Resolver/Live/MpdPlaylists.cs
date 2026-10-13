@@ -144,8 +144,17 @@ public sealed class MpdPlaylists
 	public static bool IsMpd( Uri uri )
 		=> (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) && uri.AbsolutePath.EndsWith( ".mpd", StringComparison.OrdinalIgnoreCase );
 
+	/// <summary> Manifests made up in code (YouTube's H.264 formats), served instead of fetched. </summary>
+	static readonly Dictionary<string, string> registered = new();
+
+	public static void Register( Uri url, string xml ) { lock ( registered ) registered[url.ToString()] = xml; }
+
 	public static async Task<MpdPlaylists> LoadAsync( Uri url, CancellationToken ct )
-		=> new MpdPlaylists( url, await Http.RequestStringAsync( url.ToString(), cancellationToken: ct ) );
+	{
+		string made;
+		lock ( registered ) registered.TryGetValue( url.ToString(), out made );
+		return new MpdPlaylists( url, made ?? await Http.RequestStringAsync( url.ToString(), cancellationToken: ct ) );
+	}
 
 	/// <summary> The text of one of the made up playlists - anything else comes from the network. </summary>
 	public Task<string> FetchAsync( Uri uri, CancellationToken ct )

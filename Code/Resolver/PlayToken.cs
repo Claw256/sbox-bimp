@@ -63,6 +63,18 @@ public sealed class StreamSession
 
 	/// <summary> See <see cref="StreamPlan.SwitchVideo"/>. </summary>
 	public WebmSource SwitchVideo { get; init; }
+
+	/// <summary> When the first of this session's urls expires (unix seconds, from their <c>expire=</c>), or null if none says. </summary>
+	public long? ExpiresAt
+	{
+		get
+		{
+			var urls = Plan?.Kind == StreamKind.Direct
+				? new[] { RemoteFile.ExpiryOf( Plan.DirectUrl ) }
+				: new[] { Audio?.File.ExpiresAt, Video?.File.ExpiresAt, SwitchVideo?.File.ExpiresAt };
+			return urls.Where( t => t.HasValue ).Min();
+		}
+	}
 }
 
 /// <summary>
@@ -77,9 +89,24 @@ public static class StreamSessions
 	{
 		public Task<StreamSession> Task;
 		public RealTimeSince LastUsed;
+		public RealTimeSince Created;
+	}
+
+	/// <summary> A cached session whose urls expire within this is resolved again (a backend opened now plays for a while on them). </summary>
+	const long ReuseExpiryMargin = RemoteFile.ExpiryMargin * 2;
+
+	/// <summary> A session this young isn't judged by its urls' expiry - a skewed local clock must not re-resolve every time. </summary>
+	const float MinSessionAge = 30f;
+
+	/// <summary> Which client's urls refused for a token, and when - so the next resolve skips it (see Forget). </summary>
+	class AvoidEntry
+	{
+		public string Client;
+		public RealTimeSince Since;
 	}
 
 	static readonly Dictionary<string, Entry> sessions = new();
+	static readonly Dictionary<string, AvoidEntry> avoidByToken = new();
 	static int directoryCounter;
 	static bool cacheWiped;
 
@@ -87,24 +114,38 @@ public static class StreamSessions
 	{
 		Prune();
 
-		if ( sessions.TryGetValue( token, out var e ) && !e.Task.IsFaulted && !e.Task.IsCanceled )
+		if ( sessions.TryGetValue( token, out var e ) && !e.Task.IsFaulted && !e.Task.IsCanceled && !ExpiringSoon( e ) )
 		{
 			e.LastUsed = 0;
 			return e.Task;
 		}
 
-		var entry = new Entry { Task = CreateAsync( token ), LastUsed = 0 };
+		var entry = new Entry { Task = CreateAsync( token ), LastUsed = 0, Created = 0 };
 		sessions[token] = entry;
 		return entry.Task;
 	}
 
-	/// <summary> Forget a token's session (its urls stopped working). </summary>
-	public static void Forget( string token ) => sessions.Remove( token );
+	/// <summary> A finished session whose urls are close to their <c>expire=</c> time: reusing it would hand a backend urls that die within moments. </summary>
+	static bool ExpiringSoon( Entry e )
+		=> e.Task.IsCompletedSuccessfully && e.Created > MinSessionAge
+			&& e.Task.Result.ExpiresAt is { } at && at - DateTimeOffset.UtcNow.ToUnixTimeSeconds() < ReuseExpiryMargin;
+
+	/// <summary>
+	/// Forget a token's session (its urls stopped working). With <paramref name="avoidClient"/>, resolving it again
+	/// skips that client: its urls passed the probe before dying, so a fresh resolve would walk right back into it.
+	/// </summary>
+	public static void Forget( string token, string avoidClient = null )
+	{
+		sessions.Remove( token );
+		if ( !string.IsNullOrEmpty( avoidClient ) ) avoidByToken[token] = new AvoidEntry { Client = avoidClient, Since = 0 };
+	}
 
 	static void Prune()
 	{
 		foreach ( var key in sessions.Where( kv => kv.Value.LastUsed > Lifetime ).Select( kv => kv.Key ).ToList() )
 			sessions.Remove( key );
+		foreach ( var key in avoidByToken.Where( kv => kv.Value.Since > Lifetime ).Select( kv => kv.Key ).ToList() )
+			avoidByToken.Remove( key );
 	}
 
 	static async Task<StreamSession> CreateAsync( string tokenString )
@@ -114,18 +155,26 @@ public static class StreamSessions
 		var request = token.ToRequest();
 		var ct = CancellationToken.None;
 
+		// this token's urls refused before (see Forget): skip that client for as long as the memory lasts
+		if ( avoidByToken.TryGetValue( tokenString, out var avoid ) && avoid.Since < Lifetime )
+			request.AvoidClient = avoid.Client;
+
 		var plan = await extractor.GetStreamsAsync( token.Id, request, ct );
 		if ( plan.Kind is StreamKind.Direct or StreamKind.Hls or StreamKind.Live ) return new StreamSession { Plan = plan };
 
 		// If YouTube refuses a url later (expired), resolve again and pick the same format
 		RemoteFile Remote( StreamFile f ) => new( f.Url, f.Size )
 		{
-			Refresh = async c =>
+			ClientKey = f.ClientKey,
+			Refresh = async ( refused, c ) =>
 			{
-				var fresh = await extractor.GetStreamsAsync( token.Id, request, c );
+				// the client whose url just died is the suspect (its fresh urls pass probes all the same): pick the
+				// same format from past it. Only the same format fits the index already read (an AV1 MP4 can't
+				// continue as a VP9 WebM); null - instead of the stale url - makes RemoteFile give up at once.
+				// A url that's only about to expire has no suspect: resolve as usual.
+				var fresh = await extractor.GetStreamsAsync( token.Id, refused ? request.Avoiding( f.ClientKey ) : request, c );
 				var same = new[] { fresh.Video, fresh.FallbackVideo, fresh.SwitchVideo, fresh.Audio }.FirstOrDefault( x => x?.FormatId == f.FormatId );
-				// only the same format fits the index already read (an AV1 MP4 can't continue as a VP9 WebM)
-				return same?.Url ?? f.Url;
+				return same?.Url;
 			},
 		};
 
@@ -160,13 +209,26 @@ public static class StreamSessions
 			}
 		}
 
+		// Await every probe, then report the first failure: a mass refusal (403) fails them all at once, and
+		// dropping the others' tasks resurfaced them later as unobserved-exception errors.
+		Exception firstFailure = null;
+		foreach ( var t in new[] { audioTask, videoTask, switchTask } )
+		{
+			if ( t is null ) continue;
+			try { await t; }
+			catch ( Exception e ) { firstFailure ??= e; }
+		}
+
+		if ( firstFailure is not null ) throw firstFailure;
+
 		return new StreamSession
 		{
 			Plan = plan,
-			Audio = await audioTask,
-			Video = videoTask is null ? null : await videoTask,
-			// only when the AV1 was read - its VP9 fallback plays on by itself
-			SwitchVideo = switchTask is null ? null : await switchTask is { } sw && plan.Video.Container == "mp4" ? sw : null,
+			Audio = audioTask.Result,
+			Video = videoTask?.Result,
+			// whenever it's a lower quality than the video it stands in for (the AV1, or the VP9 4K60 that replaced a
+			// failed AV1), for a file that stops answering to carry on with - the AV1 byte budget only applies to the AV1
+			SwitchVideo = switchTask is not null && plan.SwitchVideo.FormatId != plan.Video.FormatId ? switchTask.Result : null,
 		};
 	}
 

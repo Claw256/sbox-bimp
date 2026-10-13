@@ -188,7 +188,7 @@ public sealed class MediaPlayer : Component
 		captionKey = key;
 		captionCues = null;
 		var token = ++captionToken;
-		if ( track is not null ) _ = LoadCaptionsAsync( token, track );
+		if ( track is not null ) LoadCaptionsAsync( token, track ).FireAndForget( "captions" );
 	}
 
 	async Task LoadCaptionsAsync( int token, MediaCaptionTrack track )
@@ -311,7 +311,7 @@ public sealed class MediaPlayer : Component
 	{
 		if ( IsAuthority && !HasMedia && !string.IsNullOrWhiteSpace( DefaultUrl ) )
 		{
-			_ = PlayNowAsync( DefaultUrl, "Map" );
+			PlayNowAsync( DefaultUrl, "Map" ).FireAndForget( "map autoplay" );
 		}
 	}
 
@@ -392,7 +392,7 @@ public sealed class MediaPlayer : Component
 		var caller = Rpc.Caller;
 		if ( !CanControl( caller ) ) { Deny( caller, "You don't have permission to control this player." ); return; }
 
-		_ = PlayNowAsync( url, CallerName( caller ) );
+		PlayNowAsync( url, CallerName( caller ) ).FireAndForget( $"play from {CallerName( caller )}" );
 	}
 
 	/// <summary>
@@ -405,7 +405,7 @@ public sealed class MediaPlayer : Component
 		if ( !CanQueue( caller ) ) { Deny( caller, "You don't have permission to queue on this player." ); return; }
 		if ( Queue.Count >= MaxQueue ) { Deny( caller, "The queue is full." ); return; }
 
-		_ = EnqueueAsync( url, CallerName( caller ), caller );
+		EnqueueAsync( url, CallerName( caller ), caller ).FireAndForget( $"enqueue from {CallerName( caller )}" );
 	}
 
 	[Rpc.Host]
@@ -668,7 +668,7 @@ public sealed class MediaPlayer : Component
 		{
 			var next = Queue[0];
 			Queue.RemoveAt( 0 );
-			if ( next.Lazy ) _ = StartLazyAsync( next );
+			if ( next.Lazy ) StartLazyAsync( next ).FireAndForget( $"lazy start of {next.Title}" );
 			else StartItem( next );
 			return;
 		}
@@ -858,6 +858,11 @@ public sealed class MediaPlayer : Component
 
 		if ( Backend.Error is not null )
 		{
+			// the stream's urls were refused (403/410) even after a refresh - re-resolve from the next client,
+			// the same way a seek reopens, instead of sitting on the error
+			if ( Backend.Refused && TryRefusalReload() )
+				return;
+
 			// native media fails after the backend was created (resolving / downloading) - say so once
 			if ( notifiedError != Backend )
 			{
@@ -970,6 +975,29 @@ public sealed class MediaPlayer : Component
 	{
 		lastProgressTime = -1;
 		sinceProgress = 0;
+	}
+
+	const int MaxRefusalReloads = 2;
+	int refusalReloads;
+	int refusalPlayId = -1;
+
+	/// <summary>
+	/// The stream's urls were refused even after a refresh: forget the cached session and reload, so it resolves
+	/// fresh from the next source (StreamSessions skips the client that just died). Budgeted like a stall.
+	/// </summary>
+	bool TryRefusalReload()
+	{
+		if ( refusalPlayId != PlayId ) { refusalPlayId = PlayId; refusalReloads = 0; }
+		if ( refusalReloads >= MaxRefusalReloads ) return false;
+
+		refusalReloads++;
+		Log.Warning( $"[bimp] stream refused at {Backend.Time:0.0}s, re-resolving from another source ({refusalReloads}/{MaxRefusalReloads})" );
+		ShowNotice( "The stream stopped answering, switching source..." );
+
+		Backend.InvalidateSession();
+		ReloadBackend();
+		ResetStallTimer();
+		return true;
 	}
 
 	/// <summary> Merged media lands within this of the synced time without seeking (the drift threshold). </summary>

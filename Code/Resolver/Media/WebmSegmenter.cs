@@ -89,11 +89,17 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 	/// <summary> Something went wrong building a segment. </summary>
 	public string Error { get; private set; }
 
+	/// <summary> A build was refused (403/410) even after the url was refreshed - only a fresh session, from another client, helps. </summary>
+	public bool Refused { get; private set; }
+
+	/// <summary> The client that minted the url of the file that was refused (see <see cref="Refused"/>), if it's known. </summary>
+	public string RefusedClient { get; private set; }
+
 	public int Count => video is null ? 1 : ranges.Count;
 
 	bool ISegmentFeed.IsLive => false;
 	int ISegmentFeed.Newest => building.Where( kv => kv.Value.IsCompletedSuccessfully && kv.Value.Result is not null ).Select( kv => kv.Key ).DefaultIfEmpty( -1 ).Max();
-	void ISegmentFeed.Want( int seq ) => _ = GetAsync( seq );
+	void ISegmentFeed.Want( int seq ) => GetAsync( seq ).FireAndForget( $"build segment {seq}" );
 
 	/// <param name="maxLagSeconds">Start at the cue point before <paramref name="startSeconds"/> if it's at most this far behind, else at the next one.</param>
 	/// <param name="switchTo">Carry on with this video once the AV1 budget is used (see <see cref="Av1BudgetBytes"/>).</param>
@@ -122,7 +128,8 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		var i = video.IndexAt( video.TimeOf( startSeconds ) );
 		if ( i + 1 < cues.Count && startSeconds - video.SecondsOf( cues[i].Time ) > maxLagSeconds ) i++;
 		var target = FirstSegmentSeconds;
-		var budget = switchVideo is null ? long.MaxValue : Av1BudgetBytes - video.File.BytesRead;
+		// the allowance is YouTube's AV1 limit: a VP9 video keeps its switch video for a failure only (see SwitchFrom)
+		var budget = switchVideo is null || !video.IsMp4 ? long.MaxValue : Av1BudgetBytes - video.File.BytesRead;
 
 		// what a segment downloads, with its overlap into the next one
 		long Cost( int i, int j ) => VideoOverlap( video, i, j, j < video.Cues.Count ? video.Cues[j].Time : long.MaxValue, j >= video.Cues.Count ).readEnd - video.ClusterStart( i );
@@ -234,7 +241,8 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		if ( seq < 0 || seq >= Count ) return Task.FromResult<MediaSegment>( null );
 
 		var task = Build( seq );
-		if ( seq + 1 < Count ) Build( seq + 1 );
+		// the look-ahead is nobody's await: keep its fault observed (FireAndForget), it reports via Error/Refused
+		if ( seq + 1 < Count ) Build( seq + 1 ).FireAndForget( $"build segment {seq + 1}" );
 		return task;
 	}
 
@@ -271,6 +279,11 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		}
 		catch ( Exception e )
 		{
+			if ( e is FetchException { IsRefused: true } refusal )
+			{
+				Refused = true;
+				RefusedClient ??= refusal.ClientKey;
+			}
 			Error ??= e.Message;
 			Log.Warning( $"[bimp] Couldn't build segment {seq}: {e.Message}" );
 			throw;
@@ -314,8 +327,20 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		var audioTask = audio.File.ReadAsync( aStart, aEnd, ct );
 
 		MediaProbe.Note( $"seg {seq}: downloading" );
-		var videoBytes = await videoTask;
-		var audioBytes = await audioTask;
+
+		// A mass refusal (403) fails both downloads at once: awaiting them one by one orphaned the second task,
+		// which resurfaced later as an unobserved-exception error. Await both, report the first failure.
+		Exception firstFailure = null;
+		foreach ( var t in new[] { videoTask, audioTask } )
+		{
+			try { await t; }
+			catch ( OperationCanceledException ) when ( ct.IsCancellationRequested ) { throw; }
+			catch ( Exception e ) { firstFailure ??= e; }
+		}
+		if ( firstFailure is not null ) throw firstFailure;
+
+		var videoBytes = videoTask.Result;
+		var audioBytes = audioTask.Result;
 		MediaProbe.Note( $"seg {seq}: downloaded {(videoBytes.Length + audioBytes.Length) / 1048576.0:0} MB" );
 
 		// Parsing the audio and assembling the entries copies megabytes of clusters - done on a worker thread with

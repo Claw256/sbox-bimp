@@ -1,0 +1,164 @@
+{
+  "__guid": "0b6a1e52-3c1d-4f6e-9a57-6f7a2d8e4c10",
+  "GameObjects": [
+    {
+      "__guid": "1c2d3e4f-0a1b-4c2d-8e3f-5a6b7c8d9e01",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Sun",
+      "Position": "0,0,0",
+      "Rotation": "-0.0729314983,0.482239604,0.130543306,0.863182724",
+      "Scale": "1,1,1",
+      "Tags": "light_directional,light",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Sandbox.DirectionalLight",
+          "__guid": "2d3e4f5a-1b2c-4d3e-9f4a-6b7c8d9e0f02",
+          "__enabled": true,
+          "Flags": 0,
+          "LightColor": "0.94419,0.97767,1,1",
+          "Shadows": true,
+          "SkyColor": "0.2532,0.32006,0.35349,1"
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "3e4f5a6b-2c3d-4e4f-8a5b-7c8d9e0f1a03",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Floor",
+      "Position": "0,0,0",
+      "Rotation": "0,0,0,1",
+      "Scale": "10,10,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Sandbox.ModelRenderer",
+          "__guid": "4f5a6b7c-3d4e-4f5a-9b6c-8d9e0f1a2b04",
+          "__enabled": true,
+          "Flags": 0,
+          "MaterialOverride": "materials/default.vmat",
+          "Model": "models/dev/plane.vmdl",
+          "RenderType": "On",
+          "Tint": "0.2,0.2,0.22,1"
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "5a6b7c8d-4e5f-4a6b-8c7d-9e0f1a2b3c05",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Camera",
+      "Position": "200,0,90",
+      "Rotation": "0,0,1,0",
+      "Scale": "1,1,1",
+      "Tags": "maincamera",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Sandbox.CameraComponent",
+          "__guid": "6b7c8d9e-5f6a-4b7c-9d8e-0f1a2b3c4d06",
+          "__enabled": true,
+          "Flags": 0,
+          "FieldOfView": 60,
+          "IsMainCamera": true,
+          "ZFar": 10000,
+          "ZNear": 4
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "96b535f0-5a97-58b2-b500-84e0926c64eb",
+      "__version": 2,
+      "__Prefab": "prefabs/bimp_screen.prefab",
+      "__PrefabInstancePatch": {
+        "AddedObjects": [],
+        "RemovedObjects": [],
+        "PropertyOverrides": [
+          {
+            "Target": {
+              "Type": "GameObject",
+              "IdValue": "b1e0a001-0000-4000-8000-000000000001"
+            },
+            "Property": "Position",
+            "Value": "0,0,90"
+          }
+        ],
+        "MovedObjects": []
+      },
+      "__PrefabIdToInstanceId": {
+        "b1e0a001-0000-4000-8000-000000000001": "96b535f0-5a97-58b2-b500-84e0926c64eb",
+        "b1e0a001-0000-4000-8000-000000000011": "fbeebcf9-7410-5b02-b4f9-3d5952fa4569",
+        "b1e0a001-0000-4000-8000-000000000012": "3c8c3b99-98ed-521d-9997-e856c1c970ce",
+        "b1e0a001-0000-4000-8000-000000000013": "29ffb833-174d-511c-b434-612790c395b2",
+        "b1e0a001-0000-4000-8000-000000000014": "dd4bce32-cb2e-5e1d-83ed-ca964ce96163",
+        "b1e0a001-0000-4000-8000-000000000015": "503cd449-abce-56fd-8aec-6a3422033e32",
+        "b1e0a001-0000-4000-8000-000000000002": "3fd36118-cbd7-5932-8778-42fbd55a7ffd",
+        "b1e0a001-0000-4000-8000-000000000021": "6ce8f396-3b71-5aa5-9a49-614873837fbe"
+      }
+    },
+    {
+      "__guid": "c2d55ed8-15e0-513e-b6ca-50d344942f71",
+      "__version": 2,
+      "__Prefab": "prefabs/bimp_speaker.prefab",
+      "__PrefabInstancePatch": {
+        "AddedObjects": [],
+        "RemovedObjects": [],
+        "PropertyOverrides": [
+          {
+            "Target": {
+              "Type": "GameObject",
+              "IdValue": "b1e0a002-0000-4000-8000-000000000001"
+            },
+            "Property": "Position",
+            "Value": "120,-140,0"
+          }
+        ],
+        "MovedObjects": []
+      },
+      "__PrefabIdToInstanceId": {
+        "b1e0a002-0000-4000-8000-000000000001": "c2d55ed8-15e0-513e-b6ca-50d344942f71",
+        "b1e0a002-0000-4000-8000-000000000011": "2fef2324-b4c0-5d79-97e4-496cbe77222b",
+        "b1e0a002-0000-4000-8000-000000000012": "23589ba6-d841-5ec7-a009-6428876cb3f8",
+        "b1e0a002-0000-4000-8000-000000000013": "9b401186-75fe-561d-979b-44abd18d91ab",
+        "b1e0a002-0000-4000-8000-000000000002": "e7b2cff5-39e4-5396-b246-5ef59a6ac327",
+        "b1e0a002-0000-4000-8000-000000000021": "8b935da7-f090-524d-892d-7db2754585b6",
+        "b1e0a002-0000-4000-8000-000000000003": "6a90d310-512c-5237-b54a-80543bf2c466",
+        "b1e0a002-0000-4000-8000-000000000031": "f1fc26d0-0634-5254-a945-6fdf8fa05299",
+        "b1e0a002-0000-4000-8000-000000000032": "7805b58e-803a-5c47-bc0c-56818209fd5d"
+      }
+    }
+  ],
+  "SceneProperties": {
+    "NetworkInterpolation": true,
+    "PhysicsMode": "Physics3D",
+    "TimeScale": 1,
+    "WantsSystemScene": true,
+    "Metadata": {}
+  },
+  "ResourceVersion": 3,
+  "Title": "BIMP perf test",
+  "Description": "A Media Screen and a Media Speaker with a camera facing the screen, for stress testing playback (bimp_play / bimp_probe pace).",
+  "__references": [],
+  "__version": 3
+}

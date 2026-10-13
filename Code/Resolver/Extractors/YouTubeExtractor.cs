@@ -97,7 +97,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		if ( id is null )
 			throw new ResolveException( "That doesn't look like a YouTube video link." );
 
-		var (player, livePlan) = await Player( id, ct, verifyDownload: false );
+		var (player, livePlan, _) = await Player( id, ct, verifyDownload: false );
 
 		var details = player["videoDetails"];
 		if ( livePlan?.Kind == StreamKind.Live )
@@ -205,17 +205,26 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 	public async Task<StreamPlan> GetStreamsAsync( string id, StreamRequest request, CancellationToken ct )
 	{
-		var (player, plan) = await Player( id, ct, verifyDownload: true, request );
+		var (player, plan, client) = await Player( id, ct, verifyDownload: true, request );
 		if ( plan.Kind == StreamKind.Live ) return plan;
 
 		// 4K above 30 fps is more than the engine's VP9 decoder keeps up with: play the AV1 copy if there's one, for as
 		// long as YouTube serves it (~88 MB), then carry on with VP9 1440p60 (see WebmSegmenter)
 		var formats = ParseFormats( player );
+
+		// [probe] bimp_yt_codec h264: the H.264/AAC formats through the DASH path
+		if ( string.Equals( MediaSettings.YouTubeCodec?.Trim(), "h264", StringComparison.OrdinalIgnoreCase )
+			&& H264Manifest( id, formats, player["videoDetails"]?["lengthSeconds"].Long() ?? 0 ) is { } manifest )
+		{
+			Log.Info( $"[bimp] youtube {id}: playing the H.264 formats (bimp_yt_codec)" );
+			return new StreamPlan { Kind = StreamKind.Hls, DirectUrl = manifest, ClientKey = client.Key };
+		}
+
 		if ( MediaSettings.PreferAv1 && plan.Kind == StreamKind.Merge
 			&& formats.FirstOrDefault( f => f.Id == plan.Video.FormatId ) is { } vp9 && FormatSelector.TooHeavyForVp9( vp9 ) )
 		{
 			var lower = FormatSelector.SwitchLike( formats, vp9 );
-			if ( await Av1Video( id, vp9, ct ) is { } av1 )
+			if ( await Av1Video( id, vp9, request?.AvoidClient, ct ) is { } av1 )
 			{
 				plan.FallbackVideo = plan.Video;
 				plan.Video = av1;
@@ -228,7 +237,42 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				plan.Video = lower.ToFile();
 			}
 		}
+
+		// every file says who minted it: media GETs identify as that client, and a refusal re-resolves past it.
+		// The AV1 video can come from another client, and set its own key above.
+		plan.ClientKey = client.Key;
+		foreach ( var f in new[] { plan.Video, plan.FallbackVideo, plan.SwitchVideo, plan.Audio } )
+			if ( f is not null && f.ClientKey is null ) f.ClientKey = client.Key;
+
 		return plan;
+	}
+
+	/// <summary>
+	/// A made-up DASH manifest over YouTube's H.264 and AAC MP4 files (each is one file with a sidx index), registered
+	/// with <see cref="Live.MpdPlaylists"/> under a made-up url that is returned. Null if the video lacks either.
+	/// </summary>
+	static string H264Manifest( string id, List<MediaFormat> formats, long seconds )
+	{
+		var video = formats.Where( f => f.Container == "mp4" && !f.HasAudio && !f.Hdr && f.VideoCodec is { } v && v.StartsWith( "avc1" ) && f.IndexRange is not null && f.InitRange is not null ).ToList();
+		var audio = formats.Where( f => f.Container == "mp4" && !f.HasVideo && !f.Drc && f.AudioCodec is { } a && a.StartsWith( "mp4a.40.2" ) && f.IndexRange is not null && f.InitRange is not null )
+			.Where( f => f.Language is null || f.LanguageDefault )
+			.OrderByDescending( f => f.Bitrate ).FirstOrDefault();
+		if ( video.Count == 0 || audio is null ) return null;
+
+		static string Esc( string s ) => s.Replace( "&", "&amp;" ).Replace( "<", "&lt;" ).Replace( ">", "&gt;" ).Replace( "\"", "&quot;" );
+		static string Rep( MediaFormat f, string size )
+			=> $"<Representation id=\"{f.Id}\" bandwidth=\"{Math.Max( 1, f.Bitrate )}\" {size}codecs=\"{Esc( f.VideoCodec ?? f.AudioCodec )}\">"
+				+ $"<BaseURL>{Esc( f.Url )}</BaseURL><SegmentBase indexRange=\"{f.IndexRange}\"><Initialization range=\"{f.InitRange}\"/></SegmentBase></Representation>";
+
+		var xml = new System.Text.StringBuilder( $"<MPD type=\"static\" mediaPresentationDuration=\"PT{Math.Max( seconds, 1 )}S\"><Period>" );
+		xml.Append( "<AdaptationSet mimeType=\"video/mp4\">" );
+		foreach ( var f in video.OrderByDescending( f => f.Height ).ThenByDescending( f => f.Fps ).ThenByDescending( f => f.Bitrate ) )
+			xml.Append( Rep( f, $"width=\"{f.Height * 16 / 9}\" height=\"{f.Height}\" " ) );
+		xml.Append( "</AdaptationSet><AdaptationSet mimeType=\"audio/mp4\">" ).Append( Rep( audio, "" ) ).Append( "</AdaptationSet></Period></MPD>" );
+
+		var url = new Uri( $"https://bimp.invalid/yt-{id}.mpd" );
+		Live.MpdPlaylists.Register( url, xml.ToString() );
+		return url.ToString();
 	}
 
 	/// <summary> Clients that get YouTube's AV1 formats (visionos doesn't). The audio still comes from the first client. </summary>
@@ -238,11 +282,14 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	/// The AV1 (fragmented MP4) copy of a VP9 format - same height and frame rate, 8-bit SDR - from a client whose
 	/// urls actually download. Null if there's none.
 	/// </summary>
-	async Task<StreamFile> Av1Video( string id, MediaFormat like, CancellationToken ct )
+	async Task<StreamFile> Av1Video( string id, MediaFormat like, string avoidClient, CancellationToken ct )
 	{
 		var visitor = await VisitorData.GetAsync( ct );
 		foreach ( var client in InnerTubeClients.Ordered( Av1Clients ) )
 		{
+			// skip the client whose urls just refused, like the main chain does
+			if ( string.Equals( client.Key, avoidClient, StringComparison.OrdinalIgnoreCase ) ) continue;
+
 			try
 			{
 				var player = await PostPlayer( client, id, visitor, ct );
@@ -253,7 +300,9 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				if ( !await CanDownload( av1.Url, ct, Media.WebmSource.ProbeBytes ) ) continue;
 
 				Log.Info( $"[bimp] youtube {id}: {like.Height}p{like.Fps:0} as AV1 (itag {av1.Id} from {client.Key}) - the engine's VP9 decoder can't keep up" );
-				return av1.ToFile();
+				var file = av1.ToFile();
+				file.ClientKey = client.Key;
+				return file;
 			}
 			catch ( Exception e ) when ( e is not OperationCanceledException )
 			{
@@ -267,7 +316,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	/// Ask each InnerTube client in turn, until one gives playable formats (and, with verifyDownload, one whose
 	/// files can actually be downloaded - some clients get urls that need a proof-of-origin token).
 	/// </summary>
-	async Task<(JsonNode player, StreamPlan plan)> Player( string id, CancellationToken ct, bool verifyDownload, StreamRequest request = null )
+	async Task<(JsonNode player, StreamPlan plan, InnerTubeClient client)> Player( string id, CancellationToken ct, bool verifyDownload, StreamRequest request = null )
 	{
 		var visitor = await VisitorData.GetAsync( ct );
 
@@ -284,7 +333,15 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		var lang = request?.Language;
 		var clients = InnerTubeClients.Ordered( MediaSettings.YouTubeClients );
 		if ( !string.IsNullOrWhiteSpace( lang ) ) clients.AddRange( InnerTubeClients.Ordered( DubClients ).Where( c => !clients.Contains( c ) ) );
-		(JsonNode player, StreamPlan plan)? withoutDub = null;
+
+		// a client whose urls refused mid-download is skipped: its fresh urls pass the probe and die the same way
+		if ( !string.IsNullOrWhiteSpace( request?.AvoidClient ) )
+		{
+			var kept = clients.Where( c => !string.Equals( c.Key, request.AvoidClient, StringComparison.OrdinalIgnoreCase ) ).ToList();
+			if ( kept.Count > 0 ) clients = kept; // never empty the list - a single-client convar still gets tried
+		}
+
+		(JsonNode player, StreamPlan plan, InnerTubeClient client)? withoutDub = null;
 
 		// a bot check is often tied to a stale visitor id: retry the whole chain once with a fresh one
 		for ( var attempt = 0; attempt < 2; attempt++ )
@@ -325,7 +382,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				// live: its HLS playlist (H.264 TS), followed like any live HLS stream
 				if ( player["videoDetails"]?["isLive"].Bool() == true )
 				{
-					if ( player["streamingData"]?["hlsManifestUrl"].Str() is { } hls ) return (player, new StreamPlan { Kind = StreamKind.Live, DirectUrl = hls });
+					if ( player["streamingData"]?["hlsManifestUrl"].Str() is { } hls ) return (player, new StreamPlan { Kind = StreamKind.Live, DirectUrl = hls }, client);
 					Note( "YouTube didn't offer this live stream.", 1 );
 					continue;
 				}
@@ -337,7 +394,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 					continue;
 				}
 
-				if ( !verifyDownload ) return (player, null);
+				if ( !verifyDownload ) return (player, null, client);
 
 				StreamPlan plan;
 				try
@@ -350,8 +407,12 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 					continue;
 				}
 
-				var probe = plan.Audio?.Url ?? plan.Video?.Url ?? plan.DirectUrl;
-				if ( !await CanDownload( probe, ct ) )
+				// both files, and as much as the header read will ask for: a 1 byte probe (or only the audio's) passes for
+				// urls that are refused later
+				var probes = new[] { plan.Audio?.Url, plan.Video?.Url, plan.DirectUrl }.Where( u => !string.IsNullOrEmpty( u ) ).Distinct().ToList();
+				if ( probes.Count == 0 ) probes.Add( null );
+				var results = await Task.WhenAll( probes.Select( u => CanDownload( u, ct, Media.WebmSource.ProbeBytes ) ) );
+				if ( results.Any( ok => !ok ) )
 				{
 					Log.Trace( $"[bimp] youtube {client.Key}: urls refused, trying the next client" );
 					Note( "YouTube refused the stream.", 1 );
@@ -361,12 +422,12 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				if ( !FormatSelector.HasLanguage( formats, lang ) )
 				{
 					Log.Trace( $"[bimp] youtube {client.Key}: no {lang} audio, trying the next client" );
-					withoutDub ??= (player, plan);
+					withoutDub ??= (player, plan, client);
 					continue;
 				}
 
 				if ( !string.IsNullOrWhiteSpace( lang ) ) Log.Info( $"[bimp] youtube {id}: {lang} audio from {client.Key}" );
-				return (player, plan);
+				return (player, plan, client);
 			}
 
 			// nobody has the dub: the original audio it is
@@ -413,7 +474,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	{
 		try
 		{
-			var (player, plan) = await new YouTubeExtractor().Player( id, CancellationToken.None, verifyDownload: false );
+			var (_, plan, _) = await new YouTubeExtractor().Player( id, CancellationToken.None, verifyDownload: false );
 			if ( plan?.Kind != StreamKind.Live ) { Log.Info( $"[bimp] youtube {id}: not live" ); return; }
 
 			var master = await Http.RequestStringAsync( plan.DirectUrl );
@@ -505,6 +566,8 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	{
 		if ( string.IsNullOrWhiteSpace( reason ) ) return "YouTube couldn't play this video.";
 		bool Has( string text ) => reason.Contains( text, StringComparison.OrdinalIgnoreCase );
+		// a TLS / transport failure (the detail is in the log): nothing YouTube said about the video
+		if ( Has( "SSL" ) || Has( "secure connection" ) || Has( "remote party closed" ) || Has( "certificate" ) || Has( "handshake" ) ) return "Couldn't make a secure connection to YouTube. Check your network, VPN or antivirus HTTPS scanning, then try again.";
 		if ( Has( "confirm your age" ) || Has( "age-restricted" ) || Has( "inappropriate for some users" ) ) return "This video is age-restricted.";
 		if ( Has( "not a bot" ) ) return "YouTube is blocking requests right now (bot check). Try again later.";
 		if ( Has( "private video" ) ) return "This video is private.";
@@ -557,31 +620,67 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		};
 		if ( !string.IsNullOrEmpty( visitor ) ) headers["X-Goog-Visitor-Id"] = visitor;
 
-		// one retry for a transient failure (network error, 429, 5xx); a 4xx is final. No await inside a catch (sandbox).
+		// up to two retries, backing off with jitter, for a transient failure (network error, 429, 5xx); a 4xx is final, and so
+		// is a certificate failure (the same handshake fails again). No await inside a catch (sandbox).
 		var json = body.ToJsonString();
-		var status = 0;
 		string failure = null;
-		for ( var attempt = 0; attempt < 2; attempt++ )
+		for ( var attempt = 0; attempt < 3; attempt++ )
 		{
-			if ( attempt > 0 ) await GameTask.Delay( 400, ct );
+			if ( attempt > 0 ) await GameTask.Delay( (int)((attempt == 1 ? 400 : 1200) * (0.75 + 0.5 * Random.Shared.NextDouble())), ct );
 
+			var retry = true;
+			await Gate.WaitAsync( ct );
 			try
 			{
 				using var content = new StringContent( json, Encoding.UTF8, "application/json" );
 				using var response = await Http.RequestAsync( url, "POST", content, headers, ct );
-				status = (int)response.StatusCode;
+				var status = (int)response.StatusCode;
 				var text = await response.Content.ReadAsStringAsync( ct );
 				if ( status == 200 ) return JsonNode.Parse( text );
 				failure = $"YouTube returned {status}";
-				if ( status != 429 && status < 500 ) break;
+				if ( status != 429 && status < 500 ) retry = false;
 			}
 			catch ( Exception e ) when ( e is not OperationCanceledException and not ResolveException )
 			{
 				failure = $"YouTube request failed: {e.Message}";
+				Log.Warning( $"[bimp] youtube request to {url} failed (attempt {attempt + 1}): {Describe( e )}" );
+				if ( IsCertificateFailure( e ) ) retry = false;
 			}
+			finally
+			{
+				Gate.Release();
+			}
+
+			if ( !retry ) break;
 		}
 
 		throw new ResolveException( failure ?? "YouTube didn't answer." );
+	}
+
+	/// <summary> At most two YouTube API / visitor requests at once, so a session start doesn't fire a burst of TLS handshakes. Never held across another acquisition. </summary>
+	static readonly SemaphoreSlim Gate = new( 2 );
+
+	/// <summary> An exception and its whole InnerException chain, type and message each, for the log. </summary>
+	static string Describe( Exception e )
+	{
+		var sb = new StringBuilder();
+		for ( var x = e; x is not null; x = x.InnerException )
+		{
+			if ( sb.Length > 0 ) sb.Append( " <- " );
+			sb.Append( x.GetType().Name ).Append( ": " ).Append( x.Message );
+		}
+		return sb.ToString();
+	}
+
+	/// <summary> A certificate / authentication failure somewhere in the chain: retrying would fail the same way. Matched by type name (the whitelist). </summary>
+	static bool IsCertificateFailure( Exception e )
+	{
+		for ( var x = e; x is not null; x = x.InnerException )
+		{
+			var name = x.GetType().Name;
+			if ( name.Contains( "AuthenticationException" ) || name.Contains( "Certificate" ) ) return true;
+		}
+		return false;
 	}
 
 	/// <summary> The first video of a playlist, through the "next" endpoint. </summary>
@@ -671,6 +770,10 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		return (float)seconds;
 	}
 
+	/// <summary> InnerTube's {"start":"0","end":"739"} as "0-739". </summary>
+	static string Range( JsonNode node )
+		=> node is not null && node["start"].Long() is var s && node["end"].Long() is var e && e > 0 ? $"{s}-{e}" : null;
+
 	static readonly Regex MimePattern = new( "^(?<type>audio|video)/(?<container>[a-z0-9]+)(?:;\\s*codecs=\"(?<codecs>[^\"]*)\")?", RegexOptions.Compiled );
 
 	public static List<MediaFormat> ParseFormats( JsonNode player )
@@ -719,6 +822,8 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				Language = trackId?.Split( '.' )[0],
 				LanguageName = track?["displayName"].Str(),
 				LanguageDefault = track?["audioIsDefault"].Bool() ?? false,
+				InitRange = Range( f["initRange"] ),
+				IndexRange = Range( f["indexRange"] ),
 			} );
 		}
 
@@ -749,6 +854,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 		static async Task<string> Fetch()
 		{
+			await Gate.WaitAsync();
 			try
 			{
 				var html = await Http.RequestStringAsync( "https://www.youtube.com/embed/aqz-KE-bpKQ" );
@@ -757,11 +863,12 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			}
 			catch ( Exception e )
 			{
-				Log.Warning( $"[bimp] Couldn't get YouTube visitor data: {e.Message}" );
+				Log.Warning( $"[bimp] Couldn't get YouTube visitor data: {Describe( e )}" );
 				value = "";
 			}
 			finally
 			{
+				Gate.Release();
 				pending = null;
 			}
 

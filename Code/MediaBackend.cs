@@ -26,6 +26,7 @@ public sealed class MediaBackend : IDisposable
 	/// </summary>
 	Task<StreamSession> preparing;
 	string token;
+	string sessionClient;
 	bool audioOnly;
 	float startTime;
 	bool disposed;
@@ -61,6 +62,19 @@ public sealed class MediaBackend : IDisposable
 	/// </summary>
 	string error;
 	public string Error { get => error ?? live?.Error ?? segments?.Error; private set => error = value; }
+
+	/// <summary> A segment build was refused (403/410) even after the url was refreshed - only a fresh session, from another client, helps. </summary>
+	public bool Refused => segmenter?.Refused ?? false;
+
+	/// <summary>
+	/// Forget this media's cached session, so the next backend resolves fresh - skipping the client whose urls
+	/// just refused (see MediaPlayer's refusal reload).
+	/// </summary>
+	public void InvalidateSession()
+	{
+		// the file that refused may come from another client than the plan's (an AV1 video, or a refreshed url)
+		if ( token is not null ) StreamSessions.Forget( token, segmenter?.RefusedClient ?? sessionClient );
+	}
 
 	/// <summary> Live: what we're connected to ("RTSP H.264 1920x1080 + G.711 mu-law"). </summary>
 	public string LiveDescription => live is null ? null
@@ -356,6 +370,7 @@ public sealed class MediaBackend : IDisposable
 	void StartNative( StreamSession session )
 	{
 		var plan = session.Plan;
+		sessionClient = plan.ClientKey;
 
 		if ( plan.Kind == StreamKind.Direct )
 		{

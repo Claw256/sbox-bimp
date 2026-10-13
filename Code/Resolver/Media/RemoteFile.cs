@@ -15,6 +15,9 @@ public class FetchException : Exception
 
 	/// <summary> The server refused the url (expired, or tied to an old session) - worth re-resolving. </summary>
 	public bool IsRefused => StatusCode is 403 or 410;
+
+	/// <summary> The resolver client that minted the refused file's url (see <see cref="RemoteFile.ClientKey"/>), so a re-resolve can skip it. </summary>
+	public string ClientKey { get; init; }
 }
 
 /// <summary>
@@ -30,14 +33,62 @@ public sealed class RemoteFile
 	public long Size { get; private set; }
 
 	/// <summary>
-	/// Called once when the server refuses the url (403/410), to get a fresh one. Null to not retry.
+	/// Called when the server refuses the url (403/410), to get a fresh one. Null to not retry. Rate limited
+	/// (see <see cref="RefreshCooldown"/> and <see cref="MaxRefreshes"/>) so a url that keeps dying can't spin here.
+	/// The bool says whether the server refused the url (true: the minting client is suspect) or it's only about to
+	/// expire (false: the same client's fresh url is fine).
 	/// </summary>
-	public Func<CancellationToken, Task<string>> Refresh { get; set; }
-	bool refreshed;
+	public Func<bool, CancellationToken, Task<string>> Refresh { get; set; }
 
-	/// <summary> Bytes downloaded so far (YouTube stops serving some urls after so many - see WebmSegmenter). </summary>
+	/// <summary> Another refresh no earlier than this long after the last one - a fresh url that 403s again isn't a second refusal, it's the same one landing. </summary>
+	const float RefreshCooldown = 10f;
+
+	/// <summary> A refresh continue doesn't count as a retry attempt, so this caps it: a client serving fresh-but-dying urls can't loop here. </summary>
+	const int MaxRefreshes = 4;
+
+	RealTimeSince sinceRefresh;
+	int refreshes;
+
+	/// <summary> [probe] bimp_probe_refuse: answer 403 without touching the network, to exercise the refresh and the session re-resolve. </summary>
+	bool poisoned;
+	public void PoisonForProbe() => poisoned = true;
+
+	/// <summary> The resolver client that minted <see cref="Url"/> (null off YouTube) - carried into the <see cref="FetchException"/> of a refusal. </summary>
+	public string ClientKey { get; set; }
+
+	/// <summary>
+	/// Bytes downloaded from the current url, probes included (YouTube stops serving some urls after so many - see
+	/// WebmSegmenter). Lives with this file, so it carries across the segmenters and reloads that share a cached session,
+	/// and starts over when the url is replaced.
+	/// </summary>
 	public long BytesRead => System.Threading.Interlocked.Read( ref bytesRead );
 	long bytesRead;
+
+	/// <summary> A url this close to its <c>expire=</c> time is replaced before it's used (seconds). </summary>
+	public const long ExpiryMargin = 60;
+
+	/// <summary> When the current url stops working (unix seconds), from its <c>expire=</c> parameter; null if it doesn't say. </summary>
+	public long? ExpiresAt => ExpiryOf( Url );
+
+	/// <summary> The <c>expire=</c> (unix seconds) of a stream url, or null. </summary>
+	public static long? ExpiryOf( string url )
+	{
+		if ( string.IsNullOrEmpty( url ) ) return null;
+
+		var q = url.IndexOf( '?' );
+		if ( q < 0 ) return null;
+
+		foreach ( var pair in url[(q + 1)..].Split( '&' ) )
+		{
+			if ( pair.StartsWith( "expire=", StringComparison.Ordinal )
+				&& long.TryParse( pair.AsSpan( 7 ), NumberStyles.Integer, CultureInfo.InvariantCulture, out var at ) )
+				return at;
+		}
+		return null;
+	}
+
+	/// <summary> The url is about to expire (or has) according to its own <c>expire=</c>. </summary>
+	bool ExpiringSoon( long margin = ExpiryMargin ) => ExpiresAt is { } at && at - DateTimeOffset.UtcNow.ToUnixTimeSeconds() < margin;
 
 	public RemoteFile( string url, long size = 0 )
 	{
@@ -52,6 +103,7 @@ public sealed class RemoteFile
 	{
 		var (data, total) = await RequestAsync( 0, count, ct );
 		if ( total > 0 ) Size = total;
+		System.Threading.Interlocked.Add( ref bytesRead, data.Length );
 		if ( Size <= 0 ) throw new FetchException( "the server didn't report a file size" );
 		return data;
 	}
@@ -94,6 +146,7 @@ public sealed class RemoteFile
 			if ( chunk.Length == 0 ) throw new FetchException( "the server returned no data" );
 			patch?.Invoke( pos, chunk );
 			await output.WriteAsync( chunk, ct );
+			System.Threading.Interlocked.Add( ref bytesRead, chunk.Length );
 			pos += chunk.Length;
 		}
 	}
@@ -104,30 +157,60 @@ public sealed class RemoteFile
 		{
 			ct.ThrowIfCancellationRequested();
 
+			// the url says when it dies: swap it before that, rather than after the 403 (same limits as a refusal's refresh)
+			if ( attempt == 0 && !poisoned && CanRefresh && ExpiringSoon() )
+			{
+				refreshes++;
+				sinceRefresh = 0;
+				try
+				{
+					var fresh = await Refresh( false, ct );
+					if ( !string.IsNullOrEmpty( fresh ) && fresh != Url )
+					{
+						Log.Info( "[bimp] url about to expire, carrying on with a fresh one" );
+						ReplaceUrl( fresh );
+					}
+				}
+				catch ( Exception e ) when ( e is not OperationCanceledException )
+				{
+					// the request below is still worth a try - a refusal refreshes again
+					Log.Trace( $"[bimp] couldn't refresh the expiring url: {e.Message}" );
+				}
+			}
+
 			int status;
 			try
 			{
+				// no User-Agent here: the engine rejects setting it (measured 2026-10-02), so media GETs can't
+				// claim the minting client's identity - a refusal recovers by re-resolving past that client
 				var headers = new Dictionary<string, string> { ["Range"] = $"bytes={start}-{start + count - 1}" };
-				using var response = await Http.RequestAsync( Url, headers: headers, cancellationToken: ct );
-				status = (int)response.StatusCode;
 
-				if ( status is 200 or 206 )
+				// [probe] bimp_probe_refuse: answer 403 without asking the server, so the refresh and the
+				// session re-resolve can be exercised on demand
+				if ( poisoned ) status = 403;
+				else
 				{
-					var data = await response.Content.ReadAsByteArrayAsync( ct );
-					var total = TotalSize( response, status );
+					using var response = await Http.RequestAsync( Url, headers: headers, cancellationToken: ct );
+					status = (int)response.StatusCode;
 
-					// A server that ignores Range sends the whole file
-					if ( status == 200 && start > 0 )
+					if ( status is 200 or 206 )
 					{
-						if ( data.Length <= start ) throw new FetchException( "the server ignored the byte range" );
-						data = data.AsSpan( (int)start, (int)Math.Min( count, data.Length - start ) ).ToArray();
-					}
-					else if ( data.Length > count )
-					{
-						data = data.AsSpan( 0, count ).ToArray();
-					}
+						var data = await response.Content.ReadAsByteArrayAsync( ct );
+						var total = TotalSize( response, status );
 
-					return (data, total);
+						// A server that ignores Range sends the whole file
+						if ( status == 200 && start > 0 )
+						{
+							if ( data.Length <= start ) throw new FetchException( "the server ignored the byte range" );
+							data = data.AsSpan( (int)start, (int)Math.Min( count, data.Length - start ) ).ToArray();
+						}
+						else if ( data.Length > count )
+						{
+							data = data.AsSpan( 0, count ).ToArray();
+						}
+
+						return (data, total);
+					}
 				}
 			}
 			catch ( OperationCanceledException ) when ( ct.IsCancellationRequested )
@@ -146,10 +229,19 @@ public sealed class RemoteFile
 				continue;
 			}
 
-			if ( status is 403 or 410 && Refresh is not null && !refreshed )
+			if ( status is 403 or 410 && CanRefresh )
 			{
-				refreshed = true;
-				Url = await Refresh( ct );
+				refreshes++;
+				sinceRefresh = 0;
+				var fresh = await Refresh( true, ct );
+
+				// null (the format is gone from the fresh resolve) or the same url again: retrying it is pointless -
+				// fail so the segmenter records the refusal and the session gets re-resolved from another client
+				if ( string.IsNullOrEmpty( fresh ) || fresh == Url )
+					throw new FetchException( $"the server returned {status}", status ) { ClientKey = ClientKey };
+
+				Log.Info( $"[bimp] url refused ({status}), carrying on with a fresh one" );
+				ReplaceUrl( fresh );
 				continue;
 			}
 
@@ -159,8 +251,17 @@ public sealed class RemoteFile
 				continue;
 			}
 
-			throw new FetchException( $"the server returned {status}", status );
+			throw new FetchException( $"the server returned {status}", status ) { ClientKey = ClientKey };
 		}
+	}
+
+	bool CanRefresh => Refresh is not null && refreshes < MaxRefreshes && sinceRefresh >= RefreshCooldown;
+
+	/// <summary> A fresh url is a fresh allowance: what was downloaded from the old one no longer counts (see <see cref="BytesRead"/>). </summary>
+	void ReplaceUrl( string fresh )
+	{
+		Url = fresh;
+		System.Threading.Interlocked.Exchange( ref bytesRead, 0 );
 	}
 
 	static long TotalSize( HttpResponseMessage response, int status )

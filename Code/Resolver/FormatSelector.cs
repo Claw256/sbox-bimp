@@ -33,6 +33,10 @@ public sealed class MediaFormat
 	/// <summary> This is the original audio track. </summary>
 	public bool LanguageDefault { get; set; }
 
+	/// <summary> "start-end" byte ranges of the MP4 init segment and its sidx index (YouTube's adaptive MP4s), null if unknown. </summary>
+	public string InitRange { get; set; }
+	public string IndexRange { get; set; }
+
 	public bool HasVideo => VideoCodec is not null;
 	public bool HasAudio => AudioCodec is not null;
 	public bool IsVp9OrAv1 => VideoCodec is { } v && (v.StartsWith( "vp9" ) || v.StartsWith( "vp09" ) || v.StartsWith( "av01" ) || v.StartsWith( "av1" ));

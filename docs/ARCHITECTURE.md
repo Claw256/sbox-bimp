@@ -127,6 +127,30 @@ AV1 up to an 80 MB budget per session, then switches to VP9 1440p60 at the first
 segment (`plan.SwitchVideo`). A 403 on AV1 switches early. A 4K60 video with only HDR AV1 plays VP9 1440p60 from the
 start.
 
+### Recovering from a refused stream
+
+YouTube can refuse a file's URL while it plays (it expired, or the client that minted it got blocked), and a resolve-time
+check can't catch that: a client's URLs can pass a 1 byte or 256 KB probe and still be refused once the real download
+starts. So recovery has three layers:
+
+1. **Refresh the URL.** On a 403 or 410, `RemoteFile` calls its `Refresh`, which resolves the video again and picks the
+   same format id (only the same format fits the index already read). It does this at most 4 times, and not more often
+   than every 10 s. A refresh that finds nothing, or hands back the same URL, makes the request fail at once with a
+   `FetchException` that carries the status (`IsRefused`).
+2. **Skip the client that failed.** Every `StreamFile` records the InnerTube client that minted it (`ClientKey`), and the
+   refresh asks for `StreamRequest.Avoiding( client )`, which `YouTubeExtractor` honours (never emptying its client list).
+   A refused client's fresh URLs would pass the probe and die the same way, so the next resolve has to go past it.
+3. **Re-resolve the session.** When a segment build still fails with a refusal, `WebmSegmenter.Refused` is set (the AV1 to
+   VP9 switch absorbs its own failures first). `MediaPlayer.TryRefusalReload` then calls
+   `MediaBackend.InvalidateSession()`, which makes `StreamSessions.Forget` drop the cached session and remember the
+   avoided client for the session's lifetime, and reloads the backend the way a seek does: at the synced time, from a
+   fresh resolve. At most twice per video; after that the error is shown as usual.
+
+Media requests can't claim the client's identity: the engine throws if code sets a `User-Agent` header, so the fix is to
+change client, not to disguise the request. Background work that nobody awaits (the next segment's build, captions,
+queueing) goes through `TaskExtensions.FireAndForget`, and parallel downloads are all awaited before the first failure is
+rethrown, so a failure can't resurface later as an unobserved task exception.
+
 ## Live streams
 
 MPEG-TS over HTTP, HLS, RTSP cameras and Motion JPEG cameras play in-scene, with no external service and no
@@ -242,6 +266,11 @@ Found by measuring test files through the engine's own recorder and frame callba
   sizes the screen's panel and collider to its model.
 - **`MediaScreen`** works out what the camera or mouse points at on the panel itself (a plane trace), so looking and
   USE work from any distance and through `PlayerController` or not. `UseHandled` makes sure one USE press acts once.
+- **Audio range.** `MediaPlayer.AudioDistance` is the distance at which sound has faded out; the range actually used
+  (`ScaledAudioDistance`) is that times the largest component of the sound object's world scale (`SoundScale`), so a
+  screen scaled up with Sandbox's resize tool is heard from further away. The sound comes from the nearest point of the
+  screen's box collider (`SoundPositionFor`), not its centre, so standing beside a big screen is as loud as it should be.
+  `AudioFalloff` is flatter than the engine's default curve, which is made for a 15000 unit range.
 - **`ScrollingText`** is a single-line title that scrolls back and forth when it doesn't fit.
 - **`InputGlyph`** shows an input action's button (`Input.GetGlyph`), re-read every frame so it follows the device.
 - **`PadNavigation`** drives the remote with a gamepad. Pads only reach games through input actions, so it reads

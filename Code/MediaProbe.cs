@@ -437,7 +437,29 @@ public static class MediaProbe
 		var p = Game.ActiveScene?.GetAllComponents<MediaPlayer>()
 			.FirstOrDefault( x => string.IsNullOrEmpty( player ) || x.GameObject.Name.Contains( player, StringComparison.OrdinalIgnoreCase ) );
 		if ( p is null ) { Log.Warning( "[bimp probe] no media player in the scene" ); return; }
-		_ = p.PlayNowAsync( url, "Console" );
+		p.PlayNowAsync( url, "Console" ).FireAndForget( "console play" );
+	}
+
+	/// <summary>
+	/// Make the current stream's files answer 403 without touching the network, to exercise the url refresh and
+	/// the re-resolve recovery (see RemoteFile.PoisonForProbe) from the console.
+	/// </summary>
+	[ConCmd( "bimp_probe_refuse", Help = "[probe] Make the playing stream's files answer 403, to test the refresh and re-resolve recovery" )]
+	public static void RefuseCmd()
+	{
+		var p = Game.ActiveScene?.GetAllComponents<MediaPlayer>()
+			.FirstOrDefault( x => x.Backend is not null && Bimp.Resolver.PlayToken.IsToken( x.LocalStreamUrl ) );
+		if ( p is null ) { Log.Warning( "[bimp probe] no resolved media playing" ); return; }
+
+		var task = Bimp.Resolver.StreamSessions.GetAsync( p.LocalStreamUrl );
+		if ( !task.IsCompletedSuccessfully ) { Log.Warning( "[bimp probe] session not resolved yet" ); return; }
+
+		var session = task.Result;
+		var poisoned = 0;
+		foreach ( var file in new[] { session.Video?.File, session.SwitchVideo?.File, session.Audio?.File } )
+			if ( file is not null ) { file.PoisonForProbe(); poisoned++; }
+
+		Log.Info( $"[bimp probe] poisoned {poisoned} files of {p.GameObject.Name} - the next range requests will 403" );
 	}
 
 	/// <summary>

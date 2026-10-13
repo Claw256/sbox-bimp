@@ -42,6 +42,13 @@ public static class MediaSettings
 	public static bool PreferAv1 { get; set; } = true;
 
 	/// <summary>
+	/// [probe] "h264": play YouTube as its H.264 (avc1) + AAC MP4 formats, through the DASH path, to compare decoders. Not
+	/// saved, and only up to the 1080p YouTube offers in H.264.
+	/// </summary>
+	[ConVar( "bimp_yt_codec", Help = "[probe] h264 = play YouTube from its H.264/AAC formats (up to 1080p60) instead of VP9/AV1; empty = default" )]
+	public static string YouTubeCodec { get; set; } = "";
+
+	/// <summary>
 	/// Local volume multiplier for every media player.
 	/// </summary>
 	[ConVar( "bimp_volume", ConVarFlags.Saved, Min = 0, Max = 1, Help = "Local volume of all media players (0-1)" )]

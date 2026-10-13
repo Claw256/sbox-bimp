@@ -21,6 +21,16 @@ public sealed class MediaInteract : Component, Component.IPressable
 	/// </summary>
 	[Property] public MediaScreen Screen { get; set; }
 
+	/// <summary>
+	/// Hide the title and "Open controls" hint this many seconds after you start aiming at this when no on-screen
+	/// controls decide it (a speaker, or a screen with nothing playing). They come back when you look away and back.
+	/// 0 = never hide.
+	/// </summary>
+	[Property, Range( 0, 30 )] public float HideTooltipAfter { get; set; } = 3.0f;
+
+	TimeSince sinceTooltip = 1000;
+	TimeSince sinceAimStart;
+
 	MediaPlayer Target => Player.IsValid() ? Player : (Player = GetComponentInParent<MediaPlayer>());
 	MediaScreen TargetScreen => Screen.IsValid() ? Screen : (Screen = GetComponentInChildren<MediaScreen>());
 
@@ -46,6 +56,21 @@ public sealed class MediaInteract : Component, Component.IPressable
 	public IPressable.Tooltip? GetTooltip( IPressable.Event e )
 	{
 		if ( !Target.IsValid() ) return null;
+
+		// The title and "Open controls" hint go away like the on-screen controls do: with them while a screen plays
+		// media, otherwise (a speaker, or nothing playing) after HideTooltipAfter seconds of aiming. They return when
+		// you look away and back.
+		var screen = TargetScreen;
+		if ( screen.IsValid() && Target.HasMedia )
+		{
+			if ( !screen.ControlsVisible ) return null;
+		}
+		else
+		{
+			if ( sinceTooltip > 0.3f ) sinceAimStart = 0;
+			sinceTooltip = 0;
+			if ( HideTooltipAfter > 0 && sinceAimStart > HideTooltipAfter ) return null;
+		}
 
 		var title = Target.HasMedia ? Target.Title : "Media Player";
 		var icon = Target.AudioOnlyPlayer ? "speaker" : "smart_display";

@@ -66,6 +66,9 @@ Console commands (type them in the editor console, or send them through the edit
 | `bimp_queue <url> [player]` | Queue a link |
 | `bimp_status` | Every player's state, stream, live counters and last error |
 | `bimp_remote [player]` | Open or close the remote |
+| `bimp_skip` | Play the next queued item on the first player |
+| `bimp_resolve <url> [audio]` | Resolve a link like the host does and log the result or error (no scene needed) |
+| `bimp_probe_refuse` | Make the playing stream's files answer 403, to test the URL refresh and the "switching source" recovery (see ARCHITECTURE.md). It sticks to the cached session, so replaying the same video hits it again until a recovery forgets the session or its 10 minutes run out |
 | `bimp_probe <action> [seconds]` | Record a player frame by frame around an action (`none`, `pause`, `seek+N`, `pace`...) and log a table |
 | `bimp_probe_latency <seconds>` | Record live latency |
 | `bimp_probe_spectrum [seconds] [player]` | The spectrum the visualiser gets and the bar heights it shows |
