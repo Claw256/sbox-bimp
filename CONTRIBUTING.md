@@ -32,7 +32,7 @@ UI, input and `VideoPlayer` behave.
 | `Code/Resolver/Media/` | WebM/MP4 parsing and writing, range downloads, the YouTube segmenter |
 | `Code/Resolver/Live/` | Live ingest: RTSP tunnel, HLS, MPEG-TS, AAC decoding, live segmenter |
 | `Assets/` | The screen and speaker prefabs (shipped with everything that uses BIMP, so keep it to those) |
-| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md): how it works |
+| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md): how it works; [PROFILING.md](docs/PROFILING.md): finding the cause of a hitch |
 
 ## Rules of the road
 

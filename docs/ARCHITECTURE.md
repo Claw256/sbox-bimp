@@ -191,6 +191,8 @@ intermittent, so that isn't proof of anything. **Not a fix:** GC pauses were not
 pauses stayed small even during a 359 ms stall). The evidence points more at the texture upload path (a run with
 `bimp_probe_noupload 1` was clean), and that is unresolved.
 
+How to trace the cause of a hitch (what can and can't be seen, the planned event timeline and hitch detector, the OS-level tools): [PROFILING.md](PROFILING.md).
+
 ## HDR
 
 `YouTubeExtractor.IsHdr` marks a format HDR when its label says HDR, its transfer is PQ or HLG, its primaries are
