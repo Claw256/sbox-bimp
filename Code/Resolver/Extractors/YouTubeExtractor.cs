@@ -411,8 +411,15 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				// urls that are refused later
 				var probes = new[] { plan.Audio?.Url, plan.Video?.Url, plan.DirectUrl }.Where( u => !string.IsNullOrEmpty( u ) ).Distinct().ToList();
 				if ( probes.Count == 0 ) probes.Add( null );
-				var results = await Task.WhenAll( probes.Select( u => CanDownload( u, ct, Media.WebmSource.ProbeBytes ) ) );
-				if ( results.Any( ok => !ok ) )
+				var allowed = true;
+				foreach ( var u in probes )
+				{
+					// one at a time (Task.WhenAll<T> isn't on the sandbox whitelist), and a refused url ends it early
+					if ( await CanDownload( u, ct, Media.WebmSource.ProbeBytes ) ) continue;
+					allowed = false;
+					break;
+				}
+				if ( !allowed )
 				{
 					Log.Trace( $"[bimp] youtube {client.Key}: urls refused, trying the next client" );
 					Note( "YouTube refused the stream.", 1 );
