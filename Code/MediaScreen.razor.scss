@@ -108,6 +108,33 @@ $panel: rgba( 10, 12, 16, 0.85 );
 			height: 35%;
 			margin-top: 40px;
 		}
+
+		// where the track is, for the Audio view of a video (the real progress bar is in the controls)
+		.audio-progress
+		{
+			width: 80%;
+			height: 8px;
+			margin-top: 24px;
+			border-radius: 4px;
+			background-color: rgba( 255, 255, 255, 0.2 );
+
+			.fill
+			{
+				height: 100%;
+				width: 0%;
+				border-radius: 4px;
+				background-color: $accent;
+			}
+		}
+
+		.audio-time
+		{
+			margin-top: 12px;
+			font-size: 32px;
+			opacity: 0.7;
+			font-family: Inter;
+			font-variant-numeric: tabular-nums;
+		}
 	}
 
 	.loading

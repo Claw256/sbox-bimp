@@ -115,7 +115,19 @@ public sealed class MediaPlayer : Component
 	[Sync( SyncFlags.FromHost )] public float MediaDuration { get; set; }
 
 	[Sync( SyncFlags.FromHost )] public bool IsLive { get; set; }
+	/// <summary>
+	/// Playing the sound only (the spectrum on a screen). Always on for a speaker and for media that has no picture; for
+	/// anything else it's the Video / Audio view, see <see cref="CanSwitchView"/>.
+	/// </summary>
 	[Sync( SyncFlags.FromHost )] public bool AudioOnly { get; set; }
+
+	/// <summary>
+	/// The current media has a picture that the Audio view can replace, so <see cref="SetAudioView"/> does something. False on an
+	/// <see cref="AudioOnlyPlayer"/>, for media that's audio to begin with (an mp3, SoundCloud...) and for live streams (their
+	/// audio only view is a small picture with no spectrum to show). Every other source can switch: a play token (YouTube...)
+	/// asks for its audio stream, and a direct url is opened audio only.
+	/// </summary>
+	[Sync( SyncFlags.FromHost )] public bool CanSwitchView { get; set; }
 	[Sync( SyncFlags.FromHost )] public bool SeekByReload { get; set; }
 
 	/// <summary> Host time (<see cref="Time.NowDouble"/>) at which media time 0 would have played. </summary>
@@ -183,6 +195,7 @@ public sealed class MediaPlayer : Component
 	string cachedQualitiesIn;
 	string cachedAudioTracksIn;
 	int cachedQualityPref;
+	bool cachedAudioOnly;
 	string cachedAudioLangPref;
 	string cachedLocalUrl;
 	string cachedKey;
@@ -195,10 +208,12 @@ public sealed class MediaPlayer : Component
 		var audioTracks = AudioTracks;
 		var qualityPref = MediaSettings.Quality;
 		var audioLang = MediaSettings.AudioLanguage;
+		var audioOnly = AudioOnly;
 
 		if ( streamCacheValid
 			&& playId == cachedPlayId
 			&& qualityPref == cachedQualityPref
+			&& audioOnly == cachedAudioOnly
 			&& string.Equals( playUrl, cachedPlayUrl )
 			&& string.Equals( qualities, cachedQualitiesIn )
 			&& string.Equals( audioTracks, cachedAudioTracksIn )
@@ -207,15 +222,16 @@ public sealed class MediaPlayer : Component
 
 		var quality = MediaStreamOptions.ChooseQuality( MediaStreamOptions.ParseQualities( qualities ), qualityPref );
 		var track = MediaStreamOptions.ChooseAudioTrack( MediaStreamOptions.ParseAudioTracks( audioTracks ), audioLang );
-		var url = MediaStreamOptions.ApplyTo( playUrl, quality, track );
+		var url = MediaStreamOptions.ApplyTo( playUrl, quality, track, audioOnly );
 
 		cachedLocalUrl = url;
-		cachedKey = KeyFor( playId, url );
+		cachedKey = KeyFor( playId, url, audioOnly );
 		cachedPlayUrl = playUrl;
 		cachedPlayId = playId;
 		cachedQualitiesIn = qualities;
 		cachedAudioTracksIn = audioTracks;
 		cachedQualityPref = qualityPref;
+		cachedAudioOnly = audioOnly;
 		cachedAudioLangPref = audioLang;
 		streamCacheValid = true;
 	}
@@ -481,6 +497,16 @@ public sealed class MediaPlayer : Component
 		Seek( time );
 	}
 
+	/// <summary>
+	/// Switch everyone between the Video and the Audio (spectrum) view of the current media.
+	/// </summary>
+	[Rpc.Host]
+	public void RequestSetAudioView( bool audio )
+	{
+		if ( !CanControl( Rpc.Caller ) ) { Deny( Rpc.Caller, "You don't have permission to control this player." ); return; }
+		SetAudioView( audio );
+	}
+
 	[Rpc.Host]
 	public void RequestSkip()
 	{
@@ -701,7 +727,8 @@ public sealed class MediaPlayer : Component
 		RequestedBy = item.RequestedBy;
 		MediaDuration = item.Duration;
 		IsLive = item.IsLive;
-		AudioOnly = item.AudioOnly || AudioOnlyPlayer;
+		CanSwitchView = !AudioOnlyPlayer && !item.AudioOnly && !item.IsLive;
+		AudioOnly = !CanSwitchView && (AudioOnlyPlayer || item.AudioOnly) || CanSwitchView && WantsAudioView( item );
 		SeekByReload = item.SeekByReload;
 		Qualities = item.Qualities;
 		AudioTracks = item.AudioTracks;
@@ -750,12 +777,33 @@ public sealed class MediaPlayer : Component
 		Qualities = null;
 		AudioTracks = null;
 		CaptionTracks = null;
+		CanSwitchView = false;
 		MediaDuration = 0;
 		IsLive = false;
 		Paused = false;
 		PausedAt = 0;
 		Status = null;
 		PlayId++;
+	}
+
+	/// <summary> The view chosen for a link, by the url the user entered (host only): coming back to it keeps the choice. </summary>
+	readonly Dictionary<string, bool> audioViewChoices = new();
+
+	/// <summary> Audio view for an item that can switch: what was chosen for its link, else Audio for YouTube Music, Video for the rest. </summary>
+	bool WantsAudioView( MediaQueueItem item )
+		=> item.Url is not null && audioViewChoices.TryGetValue( item.Url, out var chosen ) ? chosen : item.IsMusic;
+
+	/// <summary>
+	/// Show the sound only (<paramref name="audio"/>) or the picture. Every client opens its stream again in the new view
+	/// at the synced time, as for a quality change - <see cref="AudioOnly"/> is part of the backend's key. Host only.
+	/// </summary>
+	public void SetAudioView( bool audio )
+	{
+		if ( !IsAuthority || !HasMedia || !CanSwitchView || AudioOnly == audio ) return;
+
+		if ( audioViewChoices.Count >= 64 ) audioViewChoices.Clear();
+		if ( CurrentUrl is not null ) audioViewChoices[CurrentUrl] = audio;
+		AudioOnly = audio;
 	}
 
 	public void SetPaused( bool paused )
@@ -836,7 +884,9 @@ public sealed class MediaPlayer : Component
 
 	#region Local playback
 
-	static string KeyFor( int playId, string url ) => string.IsNullOrEmpty( url ) ? null : $"{playId}|{url}";
+	/// <summary> The audio flag is in the key because a direct url is the same url in both views, and still has to be opened again. </summary>
+	static string KeyFor( int playId, string url, bool audioOnly )
+		=> string.IsNullOrEmpty( url ) ? null : audioOnly ? $"{playId}|{url}|audio" : $"{playId}|{url}";
 
 	/// <summary>
 	/// Throw away local playback and start it again at the synced time.

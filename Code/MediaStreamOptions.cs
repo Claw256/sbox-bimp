@@ -103,14 +103,15 @@ public static class MediaStreamOptions
 	}
 
 	/// <summary>
-	/// Add the client's choices to a play token (native resolver media).
+	/// Add the client's choices to a play token (native resolver media). With <paramref name="audioOnly"/> the token asks for
+	/// the audio stream, where a picture height means nothing.
 	/// </summary>
-	public static string ApplyTo( string playUrl, int height, MediaAudioTrack track )
+	public static string ApplyTo( string playUrl, int height, MediaAudioTrack track, bool audioOnly = false )
 	{
 		if ( string.IsNullOrEmpty( playUrl ) ) return playUrl;
 
-		var url = playUrl;
-		if ( height > 0 ) url += $"&h={height}";
+		var url = audioOnly ? Bimp.Resolver.PlayToken.AsAudio( playUrl ) : playUrl;
+		if ( height > 0 && !audioOnly ) url += $"&h={height}";
 		if ( track is not null ) url += $"&lang={Uri.EscapeDataString( track.Id )}";
 		return url;
 	}

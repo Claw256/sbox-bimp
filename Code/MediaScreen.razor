@@ -41,6 +41,11 @@
 			<i>graphic_eq</i>
 			<ScrollingText class="title" Text="@Player.Title"></ScrollingText>
 			<SpectrumBars Player="@Player"></SpectrumBars>
+			@if ( !Player.IsLive )
+			{
+				<div class="audio-progress"><div class="fill" @ref="AudioFill"></div></div>
+			}
+			<div class="audio-time">@TimeText</div>
 		</div>
 	}
 
@@ -247,6 +252,7 @@
 	Panel VideoSurface { get; set; }
 	Panel SeekBar { get; set; }
 	Panel SeekFill { get; set; }
+	Panel AudioFill { get; set; }
 
 	RealTimeSince sinceChanged = 0;
 	RealTimeSince sinceActivity = 100;
@@ -312,9 +318,11 @@
 			VideoSurface.Style.SetBackgroundImage( tex );
 		}
 
-		if ( SeekFill.IsValid() && Player is not null && Player.MediaDuration > 0 )
+		if ( Player is not null && Player.MediaDuration > 0 )
 		{
-			SeekFill.Style.Width = Length.Percent( (Player.CurrentTime / Player.MediaDuration * 100.0f).Clamp( 0, 100 ) );
+			var percent = Length.Percent( (Player.CurrentTime / Player.MediaDuration * 100.0f).Clamp( 0, 100 ) );
+			if ( SeekFill.IsValid() ) SeekFill.Style.Width = percent;
+			if ( AudioFill.IsValid() ) AudioFill.Style.Width = percent;
 		}
 
 		EnsureWorldInput();
@@ -689,7 +697,7 @@
 
 		return HashCode.Combine(
 			HashCode.Combine( Player.PlayId, Player.HasMedia, Player.Title, Player.Paused, Player.Status, Player.LocalNotice, Player.Queue.Count ),
-			HashCode.Combine( (int)Player.CurrentTime, Player.MediaDuration, Player.Backend?.Loaded, Player.Backend?.HasVideo, Player.CanLocalControl, RootClass ),
+			HashCode.Combine( (int)Player.CurrentTime, Player.MediaDuration, Player.Backend?.Loaded, Player.Backend?.HasVideo, Player.CanLocalControl, RootClass, Player.AudioOnly ),
 			HashCode.Combine( FlashIcon, flashId, AimedControl, UseAction, CaptionText )
 		);
 	}

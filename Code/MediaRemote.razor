@@ -72,10 +72,18 @@
 				</div>
 			}
 
-			@if ( Target.HasMedia && (Target.AvailableQualities.Count > 0 || Target.AvailableAudioTracks.Count > 0 || Target.AvailableCaptionTracks.Count > 0) )
+			@if ( Target.HasMedia && (Target.CanSwitchView || Target.AvailableQualities.Count > 0 || Target.AvailableAudioTracks.Count > 0 || Target.AvailableCaptionTracks.Count > 0) )
 			{
 				<div class="stream-options">
-					@if ( Target.AvailableQualities.Count > 0 )
+					@if ( Target.CanSwitchView )
+					{
+						@* Video / Audio for everyone watching: the host switches it, so it needs the same permission as the other transport controls *@
+						<div class="view-toggle @(Target.CanLocalControl ? "" : "disabled")" tooltip="@(Target.CanLocalControl ? "Switch everyone between the picture and the sound with a spectrum" : "You can't control this player")">
+							<div class="seg @(Target.CanLocalControl ? "nav" : "") @(Target.AudioOnly ? "" : "active")" onclick="@( () => SetAudioView( false ) )"><i>smart_display</i><span>Video</span></div>
+							<div class="seg @(Target.CanLocalControl ? "nav" : "") @(Target.AudioOnly ? "active" : "")" onclick="@( () => SetAudioView( true ) )"><i>graphic_eq</i><span>Audio</span></div>
+						</div>
+					}
+					@if ( Target.AvailableQualities.Count > 0 && !Target.AudioOnly )
 					{
 						<div class="option">
 							<i>high_quality</i>
@@ -550,13 +558,20 @@
 		if ( track is not null ) MediaSettings.SubtitleLanguage = track.Lang;
 	}
 
+	/// <summary> Video / Audio: the host reloads everyone's stream in the new view at the current time (see <see cref="MediaPlayer.SetAudioView"/>). </summary>
+	void SetAudioView( bool audio )
+	{
+		if ( Target.AudioOnly == audio || !Target.CanLocalControl ) return;
+		Target.RequestSetAudioView( audio );
+	}
+
 	string PlayingAsText
 	{
 		get
 		{
 			var b = Target.Backend;
 			if ( b is null || !b.Loaded ) return "Loading...";
-			return b.HasVideo ? $"Playing {b.Height}p" : "";
+			return b.HasVideo && !Target.AudioOnly ? $"Playing {b.Height}p" : "";
 		}
 	}
 
@@ -614,7 +629,7 @@
 			HashCode.Combine( Target.PlayId, Target.Title, Target.Paused, Target.Status, Target.LocalNotice, (int)Target.CurrentTime, Target.MediaDuration ),
 			HashCode.Combine( QueueHash(), MediaSettings.Mute, MediaSettings.Volume, MediaSettings.SpatialAudio, Target.CanLocalControl, pendingSeek, PadMode ),
 			HashCode.Combine( Target.Qualities, Target.AudioTracks, MediaSettings.Quality, MediaSettings.AudioLanguage, PlayingAsText, ShowRecent, RecentLinks.Version ),
-			HashCode.Combine( Target.CaptionTracks, MediaSettings.Subtitles, MediaSettings.SubtitleLanguage )
+			HashCode.Combine( Target.CaptionTracks, MediaSettings.Subtitles, MediaSettings.SubtitleLanguage, Target.AudioOnly, Target.CanSwitchView )
 		);
 	}
 

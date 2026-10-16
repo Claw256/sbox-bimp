@@ -26,6 +26,12 @@ public sealed class PlayToken
 	public static string Create( string extractor, string id, bool audioOnly, int maxHeight )
 		=> $"{Prefix}{extractor}/{Uri.EscapeDataString( id )}?mode={(audioOnly ? "audio" : "av")}&maxh={maxHeight}";
 
+	/// <summary>
+	/// The same token asking for the audio only stream (the view switch, see <see cref="MediaPlayer.SetAudioView"/>).
+	/// A token that already is audio only, or isn't one of ours, comes back as it was.
+	/// </summary>
+	public static string AsAudio( string token ) => IsToken( token ) ? token.Replace( "?mode=av&", "?mode=audio&" ) : token;
+
 	public static PlayToken Parse( string token )
 	{
 		if ( !IsToken( token ) ) return null;

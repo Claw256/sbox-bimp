@@ -248,6 +248,7 @@ $accent: #3fa9ff;
 	.stream-options
 	{
 		flex-direction: row;
+		flex-wrap: wrap; // quality + dub + captions + the view toggle are wider than the window
 		align-items: center;
 		gap: 12px;
 
@@ -261,6 +262,50 @@ $accent: #3fa9ff;
 			{
 				font-size: 20px;
 				opacity: 0.6;
+			}
+		}
+
+		// Video / Audio: two segments, the active one filled
+		.view-toggle
+		{
+			flex-direction: row;
+			gap: 4px;
+
+			&.disabled
+			{
+				pointer-events: none;
+				opacity: 0.5;
+			}
+
+			.seg
+			{
+				flex-direction: row;
+				align-items: center;
+				gap: 6px;
+				height: 34px;
+				padding: 0 12px;
+				border-radius: 8px;
+				font-size: 14px;
+				font-weight: 600;
+				background-color: rgba( 255, 255, 255, 0.07 );
+				border: 1px solid rgba( 255, 255, 255, 0.12 );
+				cursor: pointer;
+
+				i
+				{
+					font-size: 18px;
+				}
+
+				&.active
+				{
+					background-color: rgba( 63, 169, 255, 0.55 );
+					border-color: $accent;
+				}
+
+				&:hover
+				{
+					border-color: $accent;
+				}
 			}
 		}
 
@@ -447,7 +492,7 @@ $accent: #3fa9ff;
 		background-color: rgba( 63, 169, 255, 0.3 );
 	}
 
-	.dropdown.pad-focus, .seek.pad-focus, .volume.pad-focus, .tab.pad-focus, .small-btn.pad-focus
+	.dropdown.pad-focus, .seek.pad-focus, .volume.pad-focus, .tab.pad-focus, .small-btn.pad-focus, .seg.pad-focus
 	{
 		border-radius: 8px;
 	}
