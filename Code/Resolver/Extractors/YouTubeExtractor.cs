@@ -206,6 +206,9 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		var (player, plan, client) = await Player( id, ct, verifyDownload: true, request );
 		if ( plan.Kind == StreamKind.Live ) return plan;
 
+		// which client the files come from is the first thing a playback failure report needs
+		Log.Info( $"[bimp] youtube {id}: streams from {client.Key}{(string.IsNullOrEmpty( request?.AvoidClient ) ? "" : $" (avoiding {request.AvoidClient})")}" );
+
 		var formats = ParseFormats( player );
 
 		// [probe] bimp_yt_codec h264: the H.264/AAC formats through the DASH path
@@ -294,8 +297,9 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				if ( player?["playabilityStatus"]?["status"].Str() != "OK" ) continue;
 				if ( FormatSelector.Av1Like( ParseFormats( player ), like ) is not { } av1 ) continue;
 
-				// a 1 byte probe passes for urls that are refused later - ask for as much as the header read will
-				if ( !await CanDownload( av1.Url, ct, Media.WebmSource.ProbeBytes ) ) continue;
+				// a 1 byte probe passes for urls that are refused later - ask for as much as the header read will, and for
+				// something past where a client that only serves the start of its files gives up (see CanReadDeep)
+				if ( !await CanReadDeep( av1.Url, av1.Size, ct ) ) continue;
 
 				Log.Info( $"[bimp] youtube {id}: {like.Height}p{like.Fps:0} as AV1 (itag {av1.Id} from {client.Key}) - the engine's VP9 decoder can't keep up" );
 				var file = av1.ToFile();
@@ -332,11 +336,13 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		var clients = InnerTubeClients.Ordered( MediaSettings.YouTubeClients );
 		if ( !string.IsNullOrWhiteSpace( lang ) ) clients.AddRange( InnerTubeClients.Ordered( DubClients ).Where( c => !clients.Contains( c ) ) );
 
-		// a client whose urls refused mid-download is skipped: its fresh urls pass the probe and die the same way
+		// a client whose urls refused mid-download goes last: its fresh urls could pass the probe and die the same way, but
+		// the others may be no better (the deep probe rejects the ones that only serve the start of a file, and the refusal
+		// may have been the url expiring) - so it's the last resort rather than gone. A single-client convar still gets tried.
 		if ( !string.IsNullOrWhiteSpace( request?.AvoidClient ) )
 		{
-			var kept = clients.Where( c => !string.Equals( c.Key, request.AvoidClient, StringComparison.OrdinalIgnoreCase ) ).ToList();
-			if ( kept.Count > 0 ) clients = kept; // never empty the list - a single-client convar still gets tried
+			bool Avoided( InnerTubeClient c ) => string.Equals( c.Key, request.AvoidClient, StringComparison.OrdinalIgnoreCase );
+			clients = clients.Where( c => !Avoided( c ) ).Concat( clients.Where( Avoided ) ).ToList();
 		}
 
 		(JsonNode player, StreamPlan plan, InnerTubeClient client)? withoutDub = null;
@@ -407,19 +413,20 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 				// both files, and as much as the header read will ask for: a 1 byte probe (or only the audio's) passes for
 				// urls that are refused later
-				var probes = new[] { plan.Audio?.Url, plan.Video?.Url, plan.DirectUrl }.Where( u => !string.IsNullOrEmpty( u ) ).Distinct().ToList();
-				if ( probes.Count == 0 ) probes.Add( null );
+				var probes = new[] { (plan.Audio?.Url, plan.Audio?.Size ?? 0), (plan.Video?.Url, plan.Video?.Size ?? 0), (plan.DirectUrl, 0L) }
+					.Where( f => !string.IsNullOrEmpty( f.Item1 ) ).DistinctBy( f => f.Item1 ).ToList();
+				if ( probes.Count == 0 ) probes.Add( (null, 0L) );
 				var allowed = true;
-				foreach ( var u in probes )
+				foreach ( var (u, size) in probes )
 				{
 					// one at a time (Task.WhenAll<T> isn't on the sandbox whitelist), and a refused url ends it early
-					if ( await CanDownload( u, ct, Media.WebmSource.ProbeBytes ) ) continue;
+					if ( await CanReadDeep( u, size, ct ) ) continue;
 					allowed = false;
 					break;
 				}
 				if ( !allowed )
 				{
-					Log.Trace( $"[bimp] youtube {client.Key}: urls refused, trying the next client" );
+					Log.Info( $"[bimp] youtube {id}: {client.Key}'s urls are refused or only serve the start of the file, trying the next client" );
 					Note( "YouTube refused the stream.", 1 );
 					continue;
 				}
@@ -586,17 +593,52 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	}
 
 	static async Task<bool> CanDownload( string url, CancellationToken ct, int bytes = 1 )
+		=> await ProbeStatus( url, 0, bytes, ct ) is 200 or 206;
+
+	/// <summary> The status of a range request (0 if it couldn't be made). </summary>
+	static async Task<int> ProbeStatus( string url, long from, int bytes, CancellationToken ct )
 	{
-		if ( string.IsNullOrEmpty( url ) ) return false;
+		if ( string.IsNullOrEmpty( url ) ) return 0;
 		try
 		{
-			using var r = await Http.RequestAsync( url, headers: new() { ["Range"] = $"bytes=0-{bytes - 1}" }, cancellationToken: ct );
-			return (int)r.StatusCode is 200 or 206;
+			using var r = await Http.RequestAsync( url, headers: new() { ["Range"] = $"bytes={from}-{from + bytes - 1}" }, cancellationToken: ct );
+			return (int)r.StatusCode;
 		}
 		catch ( Exception e ) when ( e is not OperationCanceledException )
 		{
-			return false;
+			return 0;
 		}
+	}
+
+	/// <summary>
+	/// Some clients' urls (android_vr, ios and android on a bad day, measured 2026-10-16) answer the start of a file and
+	/// then refuse everything past about 1 MB with a 403 - the header probe passes, playback runs a few seconds and
+	/// dies on the second segment, however many times the url is refreshed. This looks past that point: a small range
+	/// at 3 MB (a file's end would also trip a client that is merely budgeted, like the AV1 ones), after the header
+	/// read the segmenter makes first. A file too small to reach it has nothing to check.
+	/// </summary>
+	const long DeepProbeAt = 3 * 1024 * 1024;
+	const int DeepProbeBytes = 16 * 1024;
+
+	static async Task<bool> CanReadDeep( string url, long size, CancellationToken ct )
+	{
+		if ( !await CanDownload( url, ct, Media.WebmSource.ProbeBytes ) ) return false;
+
+		// the size is unknown (0) for a direct url; a file that ends before the limit can't hit it
+		if ( size <= 0 ) return true;
+		var at = Math.Min( DeepProbeAt, size - DeepProbeBytes );
+		if ( at < 1536 * 1024 ) return true;
+
+		// a refusal is final; a transient failure (a dropped connection, 429, 5xx) gets one more try, so a good client
+		// isn't dropped for a blip
+		for ( var attempt = 0; attempt < 2; attempt++ )
+		{
+			var status = await ProbeStatus( url, at, DeepProbeBytes, ct );
+			if ( status is 200 or 206 ) return true;
+			if ( status is 403 or 410 ) return false;
+			if ( attempt == 0 ) await GameTask.Delay( 400, ct );
+		}
+		return false;
 	}
 
 	static async Task<JsonNode> PostPlayer( InnerTubeClient client, string videoId, string visitor, CancellationToken ct )
