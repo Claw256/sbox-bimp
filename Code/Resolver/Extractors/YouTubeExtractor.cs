@@ -16,6 +16,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 	const string PlayerUrl = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
 	const string NextUrl = "https://www.youtube.com/youtubei/v1/next?prettyPrint=false";
+	const string BrowseUrl = "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false";
 
 	static readonly string[] Hosts = { "youtube.com", "youtu.be", "youtube-nocookie.com" };
 	static readonly Regex IdPattern = new( "^[A-Za-z0-9_-]{11}$", RegexOptions.Compiled );
@@ -25,6 +26,9 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		var host = url.Host.ToLowerInvariant();
 		return Hosts.Any( h => host == h || host.EndsWith( "." + h ) );
 	}
+
+	/// <summary> A music.youtube.com link: its media is songs, so a player can default it to audio only. </summary>
+	public static bool IsMusicUrl( Uri url ) => url.Host.Equals( "music.youtube.com", StringComparison.OrdinalIgnoreCase );
 
 	/// <summary>
 	/// The video id in a url, or null. Sets <paramref name="playlistId"/> for playlist urls without a video.
@@ -90,6 +94,8 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	public async Task<MediaInfo> GetInfoAsync( Uri url, bool audioOnly, CancellationToken ct )
 	{
 		var id = ParseVideoId( url, out var playlistId );
+		if ( id is null && string.IsNullOrEmpty( playlistId ) )
+			playlistId = await MusicPlaylistId( url, ct );
 		if ( id is null && !string.IsNullOrEmpty( playlistId ) )
 			id = await FirstPlaylistVideo( playlistId, ct );
 		if ( id is null && ChannelLivePath.IsMatch( url.AbsolutePath ) )
@@ -101,7 +107,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 		var details = player["videoDetails"];
 		if ( livePlan?.Kind == StreamKind.Live )
-			return new MediaInfo { Extractor = Key, Id = id, Title = details?["title"].Str() ?? id, AudioOnly = audioOnly, IsLive = true };
+			return new MediaInfo { Extractor = Key, Id = id, Title = details?["title"].Str() ?? id, AudioOnly = audioOnly, IsLive = true, IsMusic = IsMusicUrl( url ) };
 		if ( details?["isLiveContent"].Bool() == true && player["streamingData"]?["adaptiveFormats"] is null )
 			throw new ResolveException( "This YouTube stream hasn't started, or has only just ended." );
 
@@ -124,6 +130,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			AudioTracks = dubs,
 			CaptionTracks = captions,
 			StartAt = StartTimeOf( url ),
+			IsMusic = IsMusicUrl( url ),
 		};
 	}
 
@@ -748,6 +755,27 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 		throw new ResolveException( "Couldn't read that YouTube playlist." );
 	}
 
+	/// <summary>
+	/// The playlist behind a YouTube Music album (<c>/browse/MPREb_...</c>), artist (<c>/channel/UC...</c>) or playlist page
+	/// (<c>/browse/VL...</c>), or null for any other url. Throws if the page has no songs.
+	/// </summary>
+	async Task<string> MusicPlaylistId( Uri url, CancellationToken ct )
+	{
+		var playlistId = YouTubeMusic.PlaylistOfBrowsePath( url );
+		if ( playlistId is not null ) return playlistId;
+
+		var browseId = YouTubeMusic.BrowseIdOf( url );
+		if ( browseId is null ) return null;
+
+		var client = YouTubeMusic.Client;
+		var visitor = await VisitorData.GetAsync();
+		var context = client.BuildContext();
+		if ( !string.IsNullOrEmpty( visitor ) ) context["client"]["visitorData"] = visitor;
+
+		var page = await PostJson( BrowseUrl, new JsonObject { ["context"] = context, ["browseId"] = browseId }, client, visitor, ct );
+		return YouTubeMusic.PlaylistOf( page ) ?? throw new ResolveException( "Couldn't find any songs on that YouTube Music page." );
+	}
+
 	async Task<JsonNode> PlaylistNext( string playlistId, string videoId, CancellationToken ct )
 	{
 		var client = InnerTubeClients.Web;
@@ -770,7 +798,8 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 	/// <summary>
 	/// The videos of a playlist link (<c>playlist?list=</c>), or of a Mix / radio link (a video with an <c>RD...</c> list:
-	/// that video, then what the mix brings). Null for anything else - a video from an ordinary playlist plays alone.
+	/// that video, then what the mix brings), or a YouTube Music album / artist / playlist page (see <see cref="MusicPlaylistId"/>;
+	/// its songs are music.youtube.com links). Null for anything else - a video from an ordinary playlist plays alone.
 	/// The "next" endpoint answers with the playlist's panel, one renderer per video (long playlists are cut off there).
 	/// </summary>
 	public async Task<List<PlaylistEntry>> GetPlaylistAsync( Uri url, int max, CancellationToken ct )
@@ -781,7 +810,11 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			playlistId = System.Web.HttpUtility.ParseQueryString( url.Query )["list"];
 			if ( playlistId is null || !playlistId.StartsWith( "RD", StringComparison.Ordinal ) ) return null;
 		}
-		else if ( string.IsNullOrEmpty( playlistId ) ) return null;
+		else if ( string.IsNullOrEmpty( playlistId ) )
+		{
+			playlistId = await MusicPlaylistId( url, ct );
+			if ( playlistId is null ) return null;
+		}
 
 		var next = await PlaylistNext( playlistId, videoId, ct );
 		var entries = new List<PlaylistEntry>();
@@ -793,7 +826,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 			if ( id is null || !IdPattern.IsMatch( id ) || ids.Contains( id ) ) continue;
 
 			var title = r["title"]?["simpleText"].Str() ?? r["title"]?["runs"]?[0]?["text"].Str() ?? id;
-			entries.Add( new PlaylistEntry( $"https://www.youtube.com/watch?v={id}", title, ParseClock( r["lengthText"]?["simpleText"].Str() ) ) );
+			entries.Add( new PlaylistEntry( $"https://{(IsMusicUrl( url ) ? "music" : "www")}.youtube.com/watch?v={id}", title, ParseClock( r["lengthText"]?["simpleText"].Str() ) ) );
 			ids.Add( id );
 		}
 

@@ -78,6 +78,7 @@ public sealed class BimpResolver
 			// a start time past the end (or on a live stream) is ignored
 			StartAt = !info.IsLive && info.StartAt > 0 && (info.Duration <= 0 || info.StartAt < info.Duration - 1) ? info.StartAt : 0,
 			AudioOnly = audio,
+			IsMusic = info.IsMusic,
 			// merged media plays from local segment files starting at a time - it seeks by reopening
 			SeekByReload = info.Merged && !info.IsLive,
 			Qualities = audio ? null : MediaStreamOptions.EncodeQualities( info.Qualities ),
@@ -114,7 +115,7 @@ public sealed class BimpResolver
 			throw new ResolveException( $"Couldn't read that playlist: {e.Message}" );
 		}
 
-		return entries?.Select( e => new MediaQueueItem { Url = e.Url, Title = e.Title, Duration = e.Duration, AudioOnly = audioOnly, Lazy = true } ).ToList();
+		return entries?.Select( e => new MediaQueueItem { Url = e.Url, Title = e.Title, Duration = e.Duration, AudioOnly = audioOnly, IsMusic = YouTubeExtractor.IsMusicUrl( uri ), Lazy = true } ).ToList();
 	}
 
 	Task<MediaInfo> GetInfoAsync( IExtractor extractor, Uri uri, bool audioOnly )

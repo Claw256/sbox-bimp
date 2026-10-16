@@ -33,6 +33,11 @@ public sealed class MediaQueueItem
 	public bool AudioOnly { get; set; }
 
 	/// <summary>
+	/// A YouTube Music link (music.youtube.com): songs, which a player can default to audio only.
+	/// </summary>
+	public bool IsMusic { get; set; }
+
+	/// <summary>
 	/// The stream can't byte-seek, seeking is done by re-requesting it with a start offset (resolver streams).
 	/// </summary>
 	public bool SeekByReload { get; set; }

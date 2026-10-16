@@ -29,6 +29,9 @@ public sealed class MediaInfo
 
 	public bool AudioOnly { get; set; }
 
+	/// <summary> A YouTube Music link (music.youtube.com): songs, which a player can default to audio only. </summary>
+	public bool IsMusic { get; set; }
+
 	/// <summary> The stream is merged into local files by each client - it seeks by reopening at a time. </summary>
 	public bool Merged { get; set; }
 
