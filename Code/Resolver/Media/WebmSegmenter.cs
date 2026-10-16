@@ -331,13 +331,16 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		var videoTask = video.File.ReadPooledAsync( vStart, vEnd, ct );
 		var audioTask = audio.File.ReadPooledAsync( aStart, aEnd, ct );
 
-		MediaProbe.Note( $"seg {seq}: downloading" );
-
 		// The downloads sit in pooled buffers (see PooledRange): they go back in the finally, once the mux has written
 		// the file - the video blocks are slices of the buffer until then - or on any failure, a cancelled build included.
-		Trace.WorkerEnter();
+		// The try starts right after the downloads do, so nothing between them can skip giving the buffers back.
+		var workerEntered = false;
 		try
 		{
+			MediaProbe.Note( $"seg {seq}: downloading" );
+			Trace.WorkerEnter();
+			workerEntered = true;
+
 			// A mass refusal (403) fails both downloads at once: awaiting them one by one orphaned the second task,
 			// which resurfaced later as an unobserved-exception error. Await both, report the first failure.
 			Exception firstFailure = null;
@@ -433,7 +436,7 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 		}
 		finally
 		{
-			Trace.WorkerExit();
+			if ( workerEntered ) Trace.WorkerExit();
 			ReturnBuffer( videoTask );
 			ReturnBuffer( audioTask );
 		}
@@ -444,8 +447,11 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 	{
 		Trace.Mark( TraceId.ReturnBuffer );
 		if ( download.IsCompletedSuccessfully ) download.Result.Dispose();
-		else if ( !download.IsCompleted ) download.ContinueWith( t => { if ( t.IsCompletedSuccessfully ) t.Result.Dispose(); else _ = t.Exception; } ); // still running: its owner is nobody now; a late fault is observed here
-		else _ = download.Exception; // already faulted: observe it, or it resurfaces from the finalizer
+
+		// Still running, or failed: the continuation runs either way (at once if it's already done), and decides from the
+		// task's final state - so a download that finishes between two checks here still gives its buffer back, and a
+		// late fault (a 403) is observed instead of resurfacing from the finalizer as an unobserved-exception error.
+		else download.ContinueWith( t => { if ( t.IsCompletedSuccessfully ) t.Result.Dispose(); else _ = t.Exception; } );
 	}
 
 	async Task<MediaSegment> BuildAudioOnly()
