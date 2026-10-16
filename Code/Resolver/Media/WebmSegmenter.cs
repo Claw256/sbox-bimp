@@ -444,7 +444,8 @@ public sealed class WebmSegmenter : ISegmentFeed, IDisposable
 	{
 		Trace.Mark( TraceId.ReturnBuffer );
 		if ( download.IsCompletedSuccessfully ) download.Result.Dispose();
-		else if ( !download.IsCompleted ) download.ContinueWith( t => { if ( t.IsCompletedSuccessfully ) t.Result.Dispose(); } ); // still running: its owner is nobody now
+		else if ( !download.IsCompleted ) download.ContinueWith( t => { if ( t.IsCompletedSuccessfully ) t.Result.Dispose(); else _ = t.Exception; } ); // still running: its owner is nobody now; a late fault is observed here
+		else _ = download.Exception; // already faulted: observe it, or it resurfaces from the finalizer
 	}
 
 	async Task<MediaSegment> BuildAudioOnly()

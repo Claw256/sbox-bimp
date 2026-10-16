@@ -122,6 +122,7 @@ public static class StreamSessions
 
 		var entry = new Entry { Task = CreateAsync( token ), LastUsed = 0, Created = 0 };
 		sessions[token] = entry;
+		entry.Task.FireAndForget( "resolve session" ); // callers see the fault; this keeps it observed if nobody is left waiting
 		return entry.Task;
 	}
 
