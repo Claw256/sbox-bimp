@@ -297,9 +297,10 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				if ( player?["playabilityStatus"]?["status"].Str() != "OK" ) continue;
 				if ( FormatSelector.Av1Like( ParseFormats( player ), like ) is not { } av1 ) continue;
 
-				// a 1 byte probe passes for urls that are refused later - ask for as much as the header read will, and for
-				// something past where a client that only serves the start of its files gives up (see CanReadDeep)
-				if ( !await CanReadDeep( av1.Url, av1.Size, ct ) ) continue;
+				// a 1 byte probe passes for urls that are refused later - ask for as much as the header read will. Not the deep
+				// probe: these clients serve only the first minute or so of a file (see CanReadDeep), which is what the VP9
+				// switch (WebmSegmenter) is for, so an AV1 url that stops later is expected
+				if ( !await CanDownload( av1.Url, ct, Media.WebmSource.ProbeBytes ) ) continue;
 
 				Log.Info( $"[bimp] youtube {id}: {like.Height}p{like.Fps:0} as AV1 (itag {av1.Id} from {client.Key}) - the engine's VP9 decoder can't keep up" );
 				var file = av1.ToFile();
@@ -413,6 +414,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 
 				// both files, and as much as the header read will ask for: a 1 byte probe (or only the audio's) passes for
 				// urls that are refused later
+				var seconds = player["videoDetails"]?["lengthSeconds"].Long() ?? 0;
 				var probes = new[] { (plan.Audio?.Url, plan.Audio?.Size ?? 0), (plan.Video?.Url, plan.Video?.Size ?? 0), (plan.DirectUrl, 0L) }
 					.Where( f => !string.IsNullOrEmpty( f.Item1 ) ).DistinctBy( f => f.Item1 ).ToList();
 				if ( probes.Count == 0 ) probes.Add( (null, 0L) );
@@ -420,7 +422,7 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 				foreach ( var (u, size) in probes )
 				{
 					// one at a time (Task.WhenAll<T> isn't on the sandbox whitelist), and a refused url ends it early
-					if ( await CanReadDeep( u, size, ct ) ) continue;
+					if ( await CanReadDeep( u, size, seconds, ct ) ) continue;
 					allowed = false;
 					break;
 				}
@@ -611,23 +613,29 @@ public sealed class YouTubeExtractor : IExtractor, IPlaylistExtractor, ICaptionE
 	}
 
 	/// <summary>
-	/// Some clients' urls (android_vr, ios and android on a bad day, measured 2026-10-16) answer the start of a file and
-	/// then refuse everything past about 1 MB with a 403 - the header probe passes, playback runs a few seconds and
-	/// dies on the second segment, however many times the url is refreshed. This looks past that point: a small range
-	/// at 3 MB (a file's end would also trip a client that is merely budgeted, like the AV1 ones), after the header
-	/// read the segmenter makes first. A file too small to reach it has nothing to check.
+	/// Some clients' urls (android_vr, ios and android, measured 2026-10-16) serve only the first minute or so of a file:
+	/// everything past a media position of about 60-80 s is a 403 - audio from 1.0 MB, VP9 1080p from 8 MB, AV1 at any
+	/// size (it's the position, not a byte count) - the header probe passes, playback runs a few seconds and dies on the
+	/// second segment, however many times the url is refreshed. This reads a small range at <see cref="DeepProbeSeconds"/>
+	/// into the file, which those clients refuse and a client that serves the whole file doesn't. A video too short to
+	/// reach the limit has nothing to check. Not for AV1: it only ever comes from those clients, and is meant to stop
+	/// early (see WebmSegmenter's switch to VP9).
 	/// </summary>
-	const long DeepProbeAt = 3 * 1024 * 1024;
+	const double DeepProbeSeconds = 120;
 	const int DeepProbeBytes = 16 * 1024;
 
-	static async Task<bool> CanReadDeep( string url, long size, CancellationToken ct )
+	static async Task<bool> CanReadDeep( string url, long size, long seconds, CancellationToken ct )
 	{
 		if ( !await CanDownload( url, ct, Media.WebmSource.ProbeBytes ) ) return false;
 
-		// the size is unknown (0) for a direct url; a file that ends before the limit can't hit it
-		if ( size <= 0 ) return true;
-		var at = Math.Min( DeepProbeAt, size - DeepProbeBytes );
-		if ( at < 1536 * 1024 ) return true;
+		// the size is unknown (0) for a direct url, and so is the length of a live stream
+		if ( size <= 0 || seconds <= 0 ) return true;
+		if ( seconds < 100 ) return true;
+
+		// the byte offset of that position, on average (the bitrate varies, the limit is nowhere near that exact)
+		var at = (long)(size * Math.Min( DeepProbeSeconds, seconds - 5 ) / seconds);
+		at = Math.Min( at, size - DeepProbeBytes );
+		if ( at < 0 ) return true;
 
 		// a refusal is final; a transient failure (a dropped connection, 429, 5xx) gets one more try, so a good client
 		// isn't dropped for a blip

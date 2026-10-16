@@ -138,8 +138,13 @@ switches early. A 4K60 video with only HDR AV1 plays VP9 1440p60 from the start.
 `android` clients serve AV1 (`YouTubeExtractor.Av1Clients`). Those AV1 URLs are documented to stop after ~88 MB, so
 `PlanRanges` cuts the AV1 at the first segment that won't fit the budget and carries on from the VP9 keyframe
 (`FormatSelector.SwitchLike`: the tallest SDR VP9 below 4K at the same frame rate, normally 1440p60). The seam reuses
-the normal segment overlap and swap logic. **Unverified:** the 88 MB figure and the assumption that it is per URL (not
-per client or visitor) have no measurement recorded here; `bimp_yt_fetch <id> <itag> android_vr 100 0 1` re-checks it.
+the normal segment overlap and swap logic. **Measured (2026-10-16):** the limit is a media *position*, not a byte count:
+`android_vr` serves only the first ~60-80 s of any file (audio from 1.0 MB, VP9 1080p from 8 MB, 4K60 AV1 at ~88 MB -
+the figure above is that minute of 4K60), and the same holds for `android` and, on most videos, `ios`. `visionos` serves
+whole files. The 80 MiB budget is therefore a 4K60-sized approximation; lower-bitrate AV1 hits the position limit long
+before it, and the 403 switch (above) is what carries it. `bimp_yt_fetch <id> <itag> android_vr 100 0 1` re-checks it.
+Because of it the main client chain probes 120 s into every file (`YouTubeExtractor.CanReadDeep`) and rejects a client
+that only serves the start; AV1, which is limited by design, is not probed that way.
 `PlanRanges` runs once, when the segmenter is made, so a proactive URL refresh (below) resets `BytesRead` but does not
 re-plan the switch.
 
